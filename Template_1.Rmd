@@ -1,0 +1,932 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+# Creating the environment
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tosr)
+library(bibliometrix)
+library(lubridate)
+library(igraph)
+library(tidytext)
+library(wordcloud)
+library(rebus)
+library(ggrepel) # improve donut visualization
+library(ggraph)
+library(visNetwork) 
+library(tidygraph)
+```
+
+This template is based in this paper
+
+https://revistas.ucm.es/index.php/REVE/article/view/75566/4564456557467
+
+For a detail explanation of how to use it, please watch this video 
+
+https://www.youtube.com/watch?v=jtKSifvNvTM
+
+# Data getting
+
+```{r}
+wos_scopus_tos <- 
+  tosr::tosr_load("data/coastal_management.bib",
+                  "data/coastal_management_1_500.txt",
+                  "data/coastal_management_501_1000.txt",
+                  "data/coastal_management_1001_1500.txt",
+                  "data/coastal_management_1501_2000.txt",
+                  "data/coastal_management_2001_2240.txt")
+
+tree_of_science <- 
+  tosr::tosR("data/coastal_management.bib",
+             "data/coastal_management_1_500.txt",
+             "data/coastal_management_501_1000.txt",
+             "data/coastal_management_1001_1500.txt",
+             "data/coastal_management_1501_2000.txt",
+             "data/coastal_management_2001_2240.txt")
+
+wos <- 
+  bibliometrix::convert2df(c("data/coastal_management_1_500.txt",
+                             "data/coastal_management_501_1000.txt",
+                             "data/coastal_management_1001_1500.txt",
+                             "data/coastal_management_1501_2000.txt",
+                             "data/coastal_management_2001_2240.txt"))  # create dataframe from wos file
+
+scopus <- 
+  bibliometrix::convert2df("data/coastal_management.bib", # Create dataframe from scopus file
+                           dbsource = "scopus", 
+                           format = "bibtex")
+```
+
+## Table 1. Search Criteria
+
+```{r}
+table_1 <- 
+  tibble(wos = length(wos$SR), # Create a dataframe with the values.
+         scopus = length(scopus$SR), 
+         total = length(wos_scopus_tos$df$SR))
+table_1
+```
+
+## Figure 1. Languages
+
+```{r}
+main_languages <- 
+  wos_scopus_tos$df |> 
+  select(LA) |> 
+  separate_rows(LA, sep = "; ") |> 
+  count(LA, sort = TRUE) |> 
+  slice(1:5)
+
+other_languages <- 
+  wos_scopus_tos$df |> 
+  separate_rows(LA, sep = "; ") |> 
+  select(LA) |> 
+  count(LA, sort = TRUE) |> 
+  slice(6:n) |> 
+  summarise(n = sum(n)) |> 
+  mutate(LA = "OTHERS") |> 
+  select(LA, n)
+
+languages <- 
+  main_languages |> 
+  bind_rows(other_languages) |> 
+  mutate(percentage = n / sum(n),
+         percentage = round(percentage, 
+                            digits = 2) ) |> 
+  rename(language = LA) |>
+  select(language, percentage, count = n)
+
+languages
+```
+
+
+```{r}
+df <- languages |> 
+  rename(value = percentage, group = language) |>
+  mutate(value = value * 100) |> 
+  select(value, group)
+
+df2 <- df %>% 
+  mutate(csum = rev(cumsum(rev(value))), 
+         pos = value/2 + lead(csum, 1),
+         pos = if_else(is.na(pos), value/2, pos))
+
+ggplot(df, aes(x = 2 , y = value, fill = fct_inorder(group))) +
+  geom_col(width = 1, color = 1) +
+  coord_polar(theta = "y") +
+  geom_label_repel(data = df2,
+                   aes(y = pos, label = paste0(value, "%")),
+                   size = 4.5, nudge_x = 1, show.legend = FALSE) +
+  theme(panel.background = element_blank(),
+        axis.line = element_blank(), 
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 18)) +
+  labs(title = "Languages") +
+  guides(fill = guide_legend(title = "")) +
+  theme_void() +
+  xlim(0.5, 2.5)
+```
+
+## Figure 2. Scientific Production
+
+```{r}
+wos_anual_production <- 
+  wos |> 
+  select(PY) |> 
+  count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(PY >= 2000,
+         PY < year(today())) |> 
+  mutate(ref_type = "wos")
+
+scopus_anual_production  <- 
+  scopus |> 
+  select(PY) |> 
+  count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(PY >= 2000,
+         PY < year(today())) |>
+  mutate(ref_type = "scopus")
+
+total_anual_production <- 
+  wos_scopus_tos$df |> 
+  select(PY) |> 
+  count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(PY >= 2000,
+         PY < year(today())) |>
+  mutate(ref_type = "total")
+
+wos_scopus_total_annual_production <- 
+  wos_anual_production |> 
+  bind_rows(scopus_anual_production,
+            total_anual_production) 
+
+figure_2_data <- 
+  wos_scopus_total_annual_production |> 
+  mutate(PY = replace_na(PY, replace = 0)) |> 
+  pivot_wider(names_from = ref_type, 
+              values_from = n) |> 
+  arrange(desc(PY))
+
+figure_2_data 
+```
+
+```{r}
+wos_scopus_total_annual_production |> 
+  ggplot(aes(x = PY, y = n, color = ref_type)) +
+  geom_line() +
+  labs(title = "Annual Scientific Production", 
+       x = "years",
+       y = "papers") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+## Table 2. Country production
+
+```{r}
+data_biblio_wos <- biblioAnalysis(wos)
+
+wos_country <- 
+  data_biblio_wos$Countries |> 
+  data.frame() |> 
+  mutate(database = "wos") |> 
+  select(country = Tab, papers = Freq, database ) |> 
+  arrange(desc(papers)) 
+
+data_biblio_scopus <- biblioAnalysis(scopus)
+
+scopus_country <- 
+  data_biblio_scopus$Countries |> 
+  data.frame() |> 
+  mutate(database = "scopus") |> 
+  select(country = Tab, papers = Freq, database ) |> 
+  arrange(desc(papers)) 
+
+data_biblio_total <- biblioAnalysis(wos_scopus_tos$df)
+
+total_country <- 
+  data_biblio_total$Countries |> 
+  data.frame() |> 
+  mutate(database = "total") |> 
+  select(country = Tab, papers = Freq, database ) |> 
+  arrange(desc(papers)) 
+
+wos_scopus_total_country <- 
+  wos_country |> 
+  bind_rows(scopus_country, 
+            total_country) |> 
+  mutate(country = as.character(country)) |> 
+  pivot_wider(names_from = database, 
+              values_from = papers) |> 
+  arrange(desc(total)) |> 
+  slice(1:10) |> 
+  mutate(percentage = total / (table_1 |> pull(total)),
+         percentage = round(percentage, digits = 2))
+
+wos_scopus_total_country
+```
+
+## Table 3. Author production
+
+```{r}
+wos_authors <- 
+  data_biblio_wos$Authors |> 
+  data.frame() |> 
+  rename(authors_wos = AU, papers_wos = Freq) |> 
+  arrange(desc(papers_wos)) |> 
+  slice(1:10) |> 
+  mutate(database_wos = "wos")
+
+
+scopus_authors <- 
+  data_biblio_scopus$Authors |> 
+  data.frame() |> 
+  rename(authors_scopus = AU, papers_scopus = Freq) |> 
+  arrange(desc(papers_scopus)) |> 
+  slice(1:10) |> 
+  mutate(database_scopus = "scopus")
+
+total_authors <- 
+  data_biblio_total$Authors |> 
+  data.frame() |> 
+  rename(authors_total = AU, 
+         papers_total = Freq) |> 
+  arrange(desc(papers_total)) |> 
+  slice(1:10) |> 
+  mutate(database_total = "total")
+
+wos_scopus_authors <- 
+  wos_authors |> 
+  bind_cols(scopus_authors,
+            total_authors)
+
+wos_scopus_authors
+```
+
+## Table 4. Journal production
+
+```{r}
+wos_journal <- 
+  wos |> 
+  select(journal = SO) |> 
+  na.omit() |> 
+  count(journal, sort = TRUE) |> 
+  slice(1:20) |> 
+  rename(publications = n) |> 
+  mutate(database = "wos")
+
+scopus_journal <- 
+  scopus |> 
+  select(journal = SO) |> 
+  na.omit() |> 
+  count(journal, sort = TRUE) |> 
+  slice(1:20) |> 
+  rename(publications = n) |> 
+  mutate(database = "scopus")
+
+total_journal <- 
+  wos_scopus_tos$df |> 
+  select(journal = SO) |> 
+  na.omit() |> 
+  count(journal, sort = TRUE) |> 
+  slice(1:20) |> 
+  rename(publications = n) |> 
+  mutate(database = "total")
+
+wos_scopus_total_journal <- 
+  wos_journal |> 
+  bind_rows(scopus_journal, 
+            total_journal) |> 
+  pivot_wider(names_from = database, 
+              values_from = publications) |> 
+  arrange(desc(total)) |> 
+  slice(1:10) |> 
+  mutate(percentage = total / table_1 |> pull(total),
+         percentage = round(percentage, digits = 2))
+
+
+wos_scopus_total_journal
+```
+
+## Figure 3. Co-citation network
+
+### Author co-citation network
+
+```{r}
+wos_scopus_author_metatag <- 
+  metaTagExtraction(wos_scopus_tos$df, Field = "CR_AU")
+
+wos_scopus_author_co_citation_matrix <- 
+  biblioNetwork(M = wos_scopus_author_metatag, 
+                analysis = "co-citation", 
+                network = "authors")
+
+aca_tbl_graph <- 
+  graph_from_adjacency_matrix(wos_scopus_author_co_citation_matrix , 
+                              mode = "undirected", 
+                              weighted = TRUE, 
+                              diag = FALSE) |> 
+  as_tbl_graph(aca_igraph, directed = FALSE ) |> 
+  activate(nodes) |> 
+  mutate(degree = centrality_degree()) |> 
+  arrange(desc(degree)) |> 
+  slice(1:30)
+
+weight_tbl <- 
+  aca_tbl_graph |> 
+  activate(edges) |> 
+  select(weight) |> 
+  as.data.frame()
+
+threshold <- 
+  quantile(weight_tbl |> 
+             select(weight) |> 
+             pull(), 
+           probs = 0.80)
+
+aca_tbl_graph_filtered <- 
+  aca_tbl_graph |> 
+  activate(edges) |> 
+  filter(weight >= threshold) |> 
+  activate(nodes) |> 
+  mutate(components = group_components(type = "weak")) |> 
+  filter(components == 1) |> 
+  mutate(degree = centrality_degree(),
+         community = as.factor(group_louvain()) )
+
+aca_tbl_graph_filtered |> 
+  ggraph(layout = "kk") + 
+  geom_edge_link(alpha = .25, 
+                 aes(width = weight)) +
+  geom_node_point(aes(colour = community, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+```
+
+### Author Collaboration network
+
+```{r}
+wos_scopus_author_collab_matrix <- 
+  biblioNetwork(M = wos_scopus_tos$df, 
+                analysis = "collaboration", 
+                network = "authors")
+
+plot_author_collab <- 
+  networkPlot(NetMatrix = wos_scopus_author_collab_matrix, 
+              weighted=T, n = 30, 
+              Title = "Author Collaboration Network", 
+              type = "fruchterman", 
+              size=T,
+              edgesize = 5,
+              labelsize=0.7)
+
+author_collab_tbl_graph <- 
+  graph_from_adjacency_matrix(wos_scopus_author_collab_matrix , 
+                              mode = "undirected", 
+                              weighted = TRUE, 
+                              diag = FALSE) |> 
+  as_tbl_graph(aca_igraph, directed = FALSE ) |> 
+  activate(nodes) |> 
+  mutate(degree = centrality_degree()) |> 
+  arrange(desc(degree)) |> 
+  slice(1:30)
+
+author_collab_tbl_graph_filtered <- 
+  author_collab_tbl_graph |> 
+  activate(edges) |> 
+  filter(weight > 1) |> 
+  activate(nodes) |> 
+  mutate(components = group_components(type = "weak")) |>
+  filter(components == 1) |>
+  mutate(degree = centrality_degree(),
+         community = as.factor(group_louvain()) )
+
+author_collab_tbl_graph_filtered |> 
+  ggraph(layout = "kk") + 
+  geom_edge_link(alpha = .25, 
+                 aes(width = weight)) +
+  geom_node_point(aes(colour = community, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+```
+
+### Country Collaboration Network
+
+```{r}
+wos_scopus_country_collab_matrix <- 
+  biblioNetwork(M = wos_scopus_tos$df, 
+                analysis = "collaboration", 
+                network = "countries")
+
+plot_country_collab <- 
+  networkPlot(wos_scopus_country_collab_matrix, 
+              weighted=T, n = 30, 
+              Title = "Country Collaboration Network", 
+              type = "fruchterman", 
+              size=T,
+              edgesize = 5,
+              labelsize=0.7)
+
+country_collab_tbl_graph <- 
+  graph_from_adjacency_matrix(wos_scopus_country_collab_matrix , 
+                              mode = "undirected", 
+                              weighted = TRUE, 
+                              diag = FALSE) |> 
+  as_tbl_graph(aca_igraph, directed = FALSE ) |> 
+  activate(nodes) |> 
+  mutate(degree = centrality_degree()) |> 
+  arrange(desc(degree)) |> 
+  slice(1:30)
+
+country_collab_tbl_graph_filtered <- 
+  country_collab_tbl_graph |> 
+  activate(nodes) |> 
+  mutate(components = group_components(type = "weak")) |>
+  filter(components == 1) |>
+  mutate(degree = centrality_degree(),
+         community = as.factor(group_louvain()) )
+
+country_collab_tbl_graph_filtered |> 
+  ggraph(layout = "kk") + 
+  geom_edge_link(alpha = .25, 
+                 aes(width = weight)) +
+  geom_node_point(aes(colour = community, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+```
+
+### Keyword co-occurrence network
+
+```{r}
+wos_scopus_keyword_co_occurrence_matrix <- 
+  biblioNetwork(M = wos_scopus_tos$df, 
+                analysis = "co-occurrences", 
+                network = "keywords", 
+                sep = ";")
+
+plot_net_co_occurrence <- 
+  networkPlot(wos_scopus_keyword_co_occurrence_matrix, 
+              weighted=T, n = 30, 
+              Title = "Keyword Co-occurrence Network", 
+              type = "fruchterman", 
+              size=T,
+              edgesize = 5,
+              labelsize=0.7)
+
+keyword_co_occurrence_tbl_graph <- 
+  graph_from_adjacency_matrix(wos_scopus_keyword_co_occurrence_matrix , 
+                              mode = "undirected", 
+                              weighted = TRUE, 
+                              diag = FALSE) |> 
+  as_tbl_graph(aca_igraph, directed = FALSE ) |> 
+  activate(nodes) |> 
+  mutate(degree = centrality_degree()) |> 
+  arrange(desc(degree)) |> 
+  slice(1:30)
+
+keyword_co_occurrence_weight_tbl <- 
+  keyword_co_occurrence_tbl_graph |> 
+  activate(edges) |> 
+  select(weight) |> 
+  as.data.frame()
+
+threshold <- 
+  quantile(keyword_co_occurrence_weight_tbl |> 
+             select(weight) |> 
+             pull(), 
+           probs = 0.80)
+
+keyword_co_occurrence_tbl_graph_filtered <- 
+  keyword_co_occurrence_tbl_graph |> 
+  activate(edges) |> 
+  filter(weight >= threshold) |> 
+  activate(nodes) |> 
+  mutate(components = group_components(type = "weak")) |> 
+  filter(components == 1) |> 
+  mutate(degree = centrality_degree(),
+         community = as.factor(group_louvain()) )
+
+keyword_co_occurrence_tbl_graph_filtered |> 
+  ggraph(layout = "kk") + 
+  geom_edge_link(alpha = .25, 
+                 aes(width = weight)) +
+  geom_node_point(aes(colour = community, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph()
+```
+
+## Figure 4. Tree of Science
+
+### Tree of Science
+
+```{r}
+tree_of_science
+```
+
+### Clustering analysis
+
+Finding the clusters
+
+```{r}
+nodes <-  # Create a dataframe with the fullname of articles 
+  tibble(name = V(wos_scopus_tos$graph)$name) |> 
+  left_join(wos_scopus_tos$nodes, 
+            by = c("name" = "ID_TOS"))
+
+wos_scopus_citation_network_1 <- # Add the article names to the citation network
+  wos_scopus_tos$graph |> 
+  igraph::set.vertex.attribute(name = "full_name", 
+                               index = V(wos_scopus_tos$graph)$name, 
+                               value = nodes$CITE)
+
+nodes_1 <- # Create a dataframe with subfields (clusters)
+  tibble(name = V(wos_scopus_citation_network_1)$name,
+         cluster = V(wos_scopus_citation_network_1)$subfield,
+         full_name = V(wos_scopus_citation_network_1)$full_name)
+
+nodes_2 <- # Count the number of articles per cluster
+  nodes_1 |> 
+  count(cluster, sort = TRUE) |> 
+  mutate(cluster_1 = row_number()) |> 
+  select(cluster, cluster_1)
+
+nodes_3 <- 
+  nodes_1 |> 
+  left_join(nodes_2) |> 
+  rename(subfield = cluster_1) |> 
+  select(name, full_name, subfield)
+
+edge_list <- 
+  get.edgelist(wos_scopus_citation_network_1) |> 
+  data.frame() |> 
+  rename(Source = X1, Target = X2)
+
+wos_scopus_citation_network <- 
+  graph.data.frame(d = edge_list, 
+                   directed = TRUE, 
+                   vertices = nodes_3)
+
+wos_scopus_citation_network |> 
+  summary()
+```
+
+Choosing clusters
+
+We proposed the tipping point option to choose the number of clusters. See this paper:
+
+https://www.nature.com/articles/s41598-021-85041-8
+
+```{r}
+clusters <- 
+  tibble(cluster = V(wos_scopus_citation_network)$subfield) |> 
+  count(cluster, sort = TRUE)
+
+clusters |> 
+  ggplot(aes(x = reorder(cluster, n), y = n)) +
+  geom_point(size = 3) +
+  labs(x = "Clusters", y = "Number of papers") +
+  theme(axis.title.x = element_text(size = 16 , 
+                                    family =  "Arial"),
+        axis.title.y = element_text(size = 16, family = "Arial"),
+        axis.text.x = element_text(size = 12, family = "Arial"), 
+        axis.text.y = element_text(size = 12, family = "Arial"))
+```
+
+Removing not chosen clusters
+
+```{r}
+wos_scopus_citation_network_clusters <- 
+  wos_scopus_citation_network |> 
+  delete.vertices(which(V(wos_scopus_citation_network)$subfield != 1 & # filter clusters 
+                          V(wos_scopus_citation_network)$subfield != 2 &
+                          V(wos_scopus_citation_network)$subfield != 3  &
+                          V(wos_scopus_citation_network)$subfield != 4))
+
+wos_scopus_citation_network_clusters |> 
+  summary()
+```
+
+### Cluster 1
+
+```{r}
+pal <- brewer.pal(8,"Dark2")
+
+nodes_full_data <- 
+  tibble(name = V(wos_scopus_citation_network)$name,
+         cluster = V(wos_scopus_citation_network)$subfield,
+         full_name = V(wos_scopus_citation_network)$full_name)
+
+cluster_1 <- 
+  wos_scopus_citation_network |> 
+  delete.vertices(which(V(wos_scopus_citation_network)$subfield != 1))
+
+cluster_1_page_rank <- 
+  cluster_1 |> 
+  set.vertex.attribute(name = "page_rank", 
+                       value = page_rank(cluster_1)$vector)
+
+cluster_1_df <- 
+  tibble(name = V(cluster_1_page_rank)$name,
+         full_name = V(cluster_1_page_rank)$full_name,
+         page_rank = V(cluster_1_page_rank)$page_rank,
+         cluster = V(cluster_1_page_rank)$subfield,)
+
+nodes_full_data |> 
+  filter(cluster == 1) |> 
+  select(full_name) |> 
+  mutate(full_name = str_extract(full_name, SPC %R%  # Regular expressions 
+                                   one_or_more(WRD) %R% 
+                                   SPC %R% 
+                                   one_or_more(or(WRD, ANY_CHAR))),
+         full_name = str_remove(full_name, OPEN_PAREN %R% 
+                                  repeated(DGT, 4) %R% 
+                                  CLOSE_PAREN %R%
+                                  one_or_more(or(WRD,ANY_CHAR))),
+         full_name = str_trim(full_name))  |> 
+  unnest_tokens(output = word, input = full_name) |> # Tokenization
+  anti_join(stop_words) |>  # Removing stop words
+  filter(word != "doi",
+         !str_detect(word, "[0-9]")) |>  # WoS data
+  filter(word == str_remove(word, pattern = "citation"),
+         word == str_remove(word, pattern = "research"),  # Words removed
+         word == str_remove(word, pattern = "analysis"), 
+         word == str_remove(word, pattern = "science"),
+         word == str_remove(word, pattern = "scientometric"),
+         word == str_remove(word, pattern = "management"),
+         word == str_remove(word, pattern = "bibliometric"),
+         word == str_remove(word, pattern = "review"),
+         word == str_remove(word, pattern = "journal")) |>
+  count(word, sort = TRUE) |> 
+  with(wordcloud(word, 
+                 n, 
+                 random.order = FALSE, 
+                 max.words = 50, 
+                 colors=pal))
+```
+
+### Cluster 2
+
+```{r}
+cluster_2 <- 
+  wos_scopus_citation_network |> 
+  delete.vertices(which(V(wos_scopus_citation_network)$subfield != 2))
+
+cluster_2_page_rank <- 
+  cluster_2 |> 
+  set.vertex.attribute(name = "page_rank", 
+                       value = page_rank(cluster_2)$vector)
+
+cluster_2_df <- 
+  tibble(name = V(cluster_2_page_rank)$name,
+         full_name = V(cluster_2_page_rank)$full_name,
+         page_rank = V(cluster_2_page_rank)$page_rank,
+         cluster = V(cluster_2_page_rank)$subfield,)
+
+nodes_full_data |> 
+  filter(cluster == 2) |> 
+  select(full_name) |> 
+  mutate(full_name = str_extract(full_name, SPC %R%  # Regular expressions 
+                                   one_or_more(WRD) %R% 
+                                   SPC %R% 
+                                   one_or_more(or(WRD, ANY_CHAR))),
+         full_name = str_remove(full_name, OPEN_PAREN %R% 
+                                  repeated(DGT, 4) %R% 
+                                  CLOSE_PAREN %R%
+                                  one_or_more(or(WRD,ANY_CHAR))),
+         full_name = str_trim(full_name))  |> 
+  unnest_tokens(output = word, input = full_name) |> 
+  anti_join(stop_words) |>
+  filter(word != "doi",
+         !str_detect(word, "[0-9]")) |>  # WoS data
+  filter(word == str_remove(word, pattern = "citation"),
+         word == str_remove(word, pattern = "research"), 
+         word == str_remove(word, pattern = "analysis"), 
+         word == str_remove(word, pattern = "science"),
+         word == str_remove(word, pattern = "scientometric"),
+         word == str_remove(word, pattern = "vulnerability")) |>
+  count(word, sort = TRUE) |> 
+  with(wordcloud(word, 
+                 n, 
+                 random.order = FALSE, 
+                 max.words = 50, 
+                 colors=pal))
+```
+
+### Cluster 3
+
+```{r}
+
+cluster_3 <- 
+  wos_scopus_citation_network |> 
+  delete.vertices(which(V(wos_scopus_citation_network)$subfield != 3))
+
+cluster_3_page_rank <- 
+  cluster_3 |> 
+  set.vertex.attribute(name = "page_rank", 
+                       value = page_rank(cluster_3)$vector)
+
+cluster_3_df <- 
+  tibble(name = V(cluster_3_page_rank)$name,
+         full_name = V(cluster_3_page_rank)$full_name,
+         page_rank = V(cluster_3_page_rank)$page_rank,
+         cluster = V(cluster_3_page_rank)$subfield,)
+
+nodes_full_data |> 
+  filter(cluster == 3) |> 
+  select(full_name) |> 
+  mutate(full_name = str_extract(full_name, SPC %R%  # Regular expressions 
+                                   one_or_more(WRD) %R% 
+                                   SPC %R% 
+                                   one_or_more(or(WRD, ANY_CHAR))),
+         full_name = str_remove(full_name, OPEN_PAREN %R% 
+                                  repeated(DGT, 4) %R% 
+                                  CLOSE_PAREN %R%
+                                  one_or_more(or(WRD,ANY_CHAR))),
+         full_name = str_trim(full_name))  |> 
+  unnest_tokens(output = word, input = full_name) |> 
+  anti_join(stop_words) |>
+  filter(word != "doi",
+         !str_detect(word, "[0-9]")) |>  # WoS data 
+  filter(word == str_remove(word, pattern = "citation"),
+         word == str_remove(word, pattern = "research"),
+         word == str_remove(word, pattern = "analysis"),
+         word == str_remove(word, pattern = "science"),
+         word == str_remove(word, pattern = "scientometric"),
+         word == str_remove(word, pattern = "vulnerability"),
+         word == str_remove(word, pattern = "journal"),
+         word == str_remove(word, pattern = "information")) |>
+  count(word, sort = TRUE) |> 
+  with(wordcloud(word, 
+                 n, 
+                 random.order = FALSE, 
+                 max.words = 50, 
+                 colors=pal))
+```
+### Cluster 4
+
+```{r}
+
+cluster_4 <- 
+  wos_scopus_citation_network |> 
+  delete.vertices(which(V(wos_scopus_citation_network)$subfield != 4))
+
+cluster_4_page_rank <- 
+  cluster_4 |> 
+  set.vertex.attribute(name = "page_rank", 
+                       value = page_rank(cluster_4)$vector)
+
+cluster_4_df <- 
+  tibble(name = V(cluster_4_page_rank)$name,
+         full_name = V(cluster_4_page_rank)$full_name,
+         page_rank = V(cluster_4_page_rank)$page_rank,
+         cluster = V(cluster_4_page_rank)$subfield,)
+
+nodes_full_data |> 
+  filter(cluster == 4) |> 
+  select(full_name) |> 
+  mutate(full_name = str_extract(full_name, SPC %R%  # Regular expressions 
+                                   one_or_more(WRD) %R% 
+                                   SPC %R% 
+                                   one_or_more(or(WRD, ANY_CHAR))),
+         full_name = str_remove(full_name, OPEN_PAREN %R% 
+                                  repeated(DGT, 4) %R% 
+                                  CLOSE_PAREN %R%
+                                  one_or_more(or(WRD,ANY_CHAR))),
+         full_name = str_trim(full_name))  |> 
+  unnest_tokens(output = word, input = full_name) |> 
+  anti_join(stop_words) |> 
+  filter(word != "doi",
+         !str_detect(word, "[0-9]")) |>  # WoS data
+  filter(word == str_remove(word, pattern = "citation"),
+         word == str_remove(word, pattern = "research"), 
+         word == str_remove(word, pattern = "analysis"), 
+         word == str_remove(word, pattern = "science"),
+         word == str_remove(word, pattern = "scientometric"),
+         word == str_remove(word, pattern = "vulnerability")) |>
+  count(word, sort = TRUE) |> 
+  with(wordcloud(word, 
+                 n, 
+                 random.order = FALSE, 
+                 max.words = 50, 
+                 colors=pal))
+```
+
+# Exporting files
+
+```{r}
+
+write_csv(wos_scopus_tos$df, "wos_scopus_tos.csv") # Exporting all data merged
+
+write_csv(table_1, "table_1.csv") # Exporting table 1
+write_csv(wos_scopus_total_country, "table_2_.csv")  # Exporting table 2
+write_csv(wos_scopus_authors, "table_3.csv") # Exporting table 3
+write_csv(wos_scopus_total_journal, "table_4.csv") # Exporting table 4
+
+
+write_csv(languages, "figure_1.csv") # Exporting data figure 1 
+write_csv(figure_2_data, "figure_2.csv") # Exporting data figure 2
+
+write.graph(wos_scopus_citation_network, "output/citation_network_full.graphml", "graphml") # Exporting graph
+write.graph(wos_scopus_citation_network_clusters, 
+            "wos_scopus_citation_network_clusters.graphml", 
+            "graphml")
+
+aca_graphml_nodes <- 
+  aca_tbl_graph_filtered |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  rename(author = name) |> 
+  rownames_to_column("name")
+
+aca_graphml_edges <- 
+  aca_tbl_graph_filtered |> 
+  activate(edges) |> 
+  as_tibble() 
+
+aca_graphml <- 
+  graph_from_data_frame(d = aca_graphml_edges, 
+                        directed = FALSE, 
+                        vertices = aca_graphml_nodes)
+
+write_graph(aca_graphml, "aca_graph.graphml", "graphml") # Export author co-citation graph
+
+author_collab_graphml_nodes <- 
+  author_collab_tbl_graph_filtered |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  rename(author = name) |> 
+  rownames_to_column("name")
+
+author_collab_graphml_edges <- 
+  author_collab_tbl_graph_filtered |> 
+  activate(edges) |> 
+  as_tibble() 
+
+author_collab_graphml <- 
+  graph_from_data_frame(d = author_collab_graphml_edges, 
+                        directed = FALSE, 
+                        vertices = author_collab_graphml_nodes)
+
+write_graph(author_collab_graphml, "author_collab_graphml.graphml", "graphml") # Export author co-citation graph
+
+country_collab_graphml_nodes <- 
+  country_collab_tbl_graph_filtered |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  rename(author = name) |> 
+  rownames_to_column("name")
+
+country_collab_graphml_edges <- 
+  country_collab_tbl_graph_filtered |> 
+  activate(edges) |> 
+  as_tibble() 
+
+country_collab_graphml <- 
+  graph_from_data_frame(d = country_collab_graphml_edges, 
+                        directed = FALSE, 
+                        vertices = country_collab_graphml_nodes)
+
+write_graph(country_collab_graphml, "country_collab_graphml.graphml", "graphml") # Export author co-citation graph
+
+keyword_co_occurrence_graphml_nodes <- 
+  keyword_co_occurrence_tbl_graph_filtered |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  rename(author = name) |> 
+  rownames_to_column("name")
+
+keyword_co_occurrence_graphml_edges <- 
+  keyword_co_occurrence_tbl_graph_filtered |> 
+  activate(edges) |> 
+  as_tibble()  
+
+keyword_co_occurrence_graphml <- 
+  graph_from_data_frame(d = keyword_co_occurrence_graphml_edges, 
+                        directed = FALSE, 
+                        vertices = keyword_co_occurrence_graphml_nodes)
+
+write_graph(keyword_co_occurrence_graphml, "keyword_co_occurrence_graphml.graphml", "graphml") # Export author co-citation graph
+
+write.csv(tree_of_science, "tree_of_science.csv") # Exporting Tree of Science
+
+write.csv(cluster_1_df, "cluster_1.csv") # Exporting cluster 1
+write.csv(cluster_2_df, "cluster_2.csv") # Exporting cluster 2
+write.csv(cluster_3_df, "cluster_3.csv") # Exporting cluster 3
+write.csv(cluster_4_df, "cluster_4.csv") # Exporting cluster 4
+
+write.csv(nodes_full_data, "nodes_full_data.csv") # Exporting all nodes
+```
