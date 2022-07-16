@@ -1,0 +1,42 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(tidygraph)
+library(igraph)
+```
+
+
+# Reading data 
+
+```{r}
+data_selected <- 
+  read_csv("selected_data.csv")
+
+data_graph <- 
+  read_graph("citation_network_full-CZM(19may).graphml", "graphml") |> 
+  as_tbl_graph()
+  
+```
+
+Analysis
+
+```{r}
+data_graph |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  select(full_name, subfield) |> View()
+```
+
+
+```{r}
+dummy_str
+```
+
+```{r}
+dummy_str_1
+```
+

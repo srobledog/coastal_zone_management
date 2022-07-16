@@ -1,0 +1,133 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+figure_1_all <- 
+data_consilidada_1 |> 
+  select(ID_TOS = name, year, ref_type) |> 
+  left_join(scopus_man_found |> 
+              select(ID_TOS) |> 
+              mutate(scopus = "scopus"), by = "ID_TOS") |> 
+  mutate(ref_type = if_else(is.na(ref_type) , 
+                            scopus, ref_type )) |> 
+  select(-scopus) |> 
+  mutate(ref_type = if_else(is.na(ref_type), "other", ref_type)) |> 
+  rename(PY = year)
+
+```
+
+```{r}
+other_anual_production <- 
+  figure_1_all |> 
+  filter(ref_type == "other") |> 
+  select(PY) |>
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |> 
+  mutate(ref_type = "other") 
+
+wos_anual_production <- 
+  figure_1_all |> 
+  filter(ref_type == "wos") |> 
+  select(PY) |>
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |> 
+  mutate(ref_type = "wos") 
+
+scopus_anual_production  <- 
+  figure_1_all |> 
+  filter(ref_type == "scopus")  |> 
+  select(PY) |> 
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |>
+  mutate(ref_type = "scopus") 
+
+total_anual_production <- 
+  figure_1_all |> 
+  select(PY) |> 
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |>
+  mutate(ref_type = "total") |> 
+  arrange(desc(PY))
+
+wos_scopus_total_annual_production <- 
+  wos_anual_production |> 
+  bind_rows(scopus_anual_production,
+            total_anual_production,
+            other_anual_production) |> 
+  mutate(n = as.numeric(n))
+
+figure_1_1_data <- 
+  wos_scopus_total_annual_production |> 
+  pivot_wider(names_from = ref_type,
+              values_from = n) |> 
+  mutate(across(everything(), ~replace_na(.x,0)))
+
+# Creating the range of missing years
+
+range_tbl <- 
+  tibble(PY = range(figure_1_1_data$PY)[1]:range(figure_1_1_data$PY)[2]) |> 
+  mutate(PY = as.numeric(PY))
+
+figure_1_1_data_all_years <- 
+  figure_1_1_data |> 
+  right_join(range_tbl) |> 
+  mutate(across(everything(), ~replace_na(.x, 0)))
+```
+
+
+# Descriptive Analysis
+
+## Scientific Production
+
+## Figure 1a - Scopus + WoS
+
+```{r}
+figure_1a <- 
+  figure_1_1_data_all_years |> 
+  pivot_longer(!PY, names_to = "ref_type", values_to = "n") |> 
+  filter(ref_type != "total") |> 
+  ggplot(aes(x = factor(PY), 
+             y = n, 
+             fill = ref_type)) +
+  geom_bar(stat = "identity", 
+           position = "dodge") +
+  geom_text(aes(label = n),
+            vjust = -0.3,
+            position = position_dodge(0.9),
+            size = 3,
+            family = "Times") +
+  scale_fill_manual(values = c("brown3",
+                               "springgreen3",
+                               "orange3")) +
+  theme(text = element_text(family = "Times",
+                            face = "bold",
+                            size =12),
+        panel.background = element_rect(fill = "white"),
+        legend.position = "bottom",
+        legend.title = element_text(size = 0),
+        axis.text.x = element_text(face = "bold", 
+                                   angle = 45, 
+                                   vjust = 0.5),
+        axis.line = element_line(color = "black", 
+                                 size = 0.2)) +
+  labs(y = "Number of publications", 
+       x = "Year") 
+
+figure_1a
+```
+
+
+
+
+
+

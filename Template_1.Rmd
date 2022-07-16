@@ -20,7 +20,7 @@ library(wordcloud)
 library(rebus)
 library(ggrepel) # improve donut visualization
 library(ggraph)
-library(visNetwork) 
+library(visNetwork)
 library(tidygraph)
 ```
 

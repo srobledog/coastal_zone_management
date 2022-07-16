@@ -1,0 +1,482 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Organizando el ambiente de trabajo 
+
+```{r}
+library(tidyverse)
+library(tidygraph)
+library(tidytext)
+library(igraph)
+library(sjrdata)
+library(journalabbr)
+library(openxlsx)
+library(lubridate)
+source("verbs.R")
+```
+
+# Preprocesamiento
+
+## Cargando los datos
+
+Cargamos los datos que Camilo seleccionó. En total son 176 datos. 
+
+```{r}
+data_consilidada <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1iwBM_RY391OVuuK1XrXJdtDoVLim1BBJ/export?format=csv&gid=1070729370") 
+           
+```
+
+## Organizando los datos
+
+A estos datos les hace falta toda la información que se extrae de WoS y Scopus. 
+Tenemos algunos datos en las consultas iniciales de WoS u Scopus. Por lo que, 
+pegamos estos datos al data set de Camilo (data_consiliada). 
+
+```{r}
+data_consilidada_1 <- 
+  data_consilidada |> 
+  left_join(wos_scopus_tos$df, by = c("name" = "ID_TOS")) |> 
+  filter(!duplicated(name))
+```
+
+En este dataset si está el AU_CO que necesitamos para hacer los análisis descriptivos. 
+
+Seleccionando los datos que faltan
+
+```{r}
+data_consilidada_2 <- 
+  data_consilidada_1 |> 
+  filter(is.na(AU)) |> 
+  select(name, full_name)
+```
+
+Con los datos que faltan, extraer el título para buscarlo en Scopus y WoS 
+
+```{r}
+data_consolidada_2_titles <- 
+  data_consilidada |> 
+  get_titles() |> 
+  select(TI) |> 
+  na.omit()
+```
+
+Leyendo los datos de Scopus que se encontraron a partir de los títulos
+
+```{r}
+# scopus_encontrados <- 
+#   tosr::tosr_load("data/scopus_1_10.bib")
+# 
+# scopus_encontrados <- 
+#   bibliometrix::convert2df(file = "data/coastal_management.bib", 
+#                            dbsource = "scopus", 
+#                            format = "bibtex")
+
+scopus_man_found <- 
+  read_csv("data/scopus_encontrados.csv")
+
+data_consilidada_full_36 <- 
+  data_consilidada_2 |> 
+  left_join(scopus_man_found, 
+            by = c("name" = "ID_TOS")) |> 
+  filter(!is.na(AU))
+
+data_consilidada_missing_97 <- 
+  data_consilidada_2 |> 
+  left_join(scopus_man_found, 
+            by = c("name" = "ID_TOS")) |> 
+  filter(is.na(AU))
+
+```
+
+Merging scopus with scopus found
+
+```{r}
+
+data_consilidada_full_43 <- 
+  data_consilidada_1 |> 
+  filter(!is.na(AU)) 
+
+
+data_consiliada_full_79 <- 
+  data_consilidada_full_43 |>  
+  select(-subfield, -year, -AU_CO) |> 
+  bind_rows(data_consilidada_full_36 |> 
+              select(-coden, -BN, -page_count, -sponsors, 
+                     -PP, -url, -SR_TOS) |> 
+              mutate(PN = as.character(PN),
+                     PM = as.character(PM))) 
+
+data_consolidada_97_missing <- 
+  data_consilidada_1 |> 
+  left_join()
+  data_consiliada_full_79 |> 
+  
+```
+
+
+```{r}
+wos_anual_production <- 
+  data_consiliada_full_79 |> 
+  filter(ref_type == "wos") |> 
+  select(PY) |>
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |> 
+  mutate(ref_type = "wos") 
+
+scopus_anual_production  <- 
+  data_consiliada_full_79 |> 
+  filter(ref_type == "scopus")  |> 
+  select(PY) |> 
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |>
+  mutate(ref_type = "scopus") 
+
+total_anual_production <- 
+  data_consiliada_full_79 |> 
+  select(PY) |> 
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  filter(#PY >= 2000,
+         PY < year(today())) |>
+  mutate(ref_type = "total") |> 
+  arrange(desc(PY))
+
+wos_scopus_total_annual_production <- 
+  wos_anual_production |> 
+  bind_rows(scopus_anual_production,
+            total_anual_production) 
+
+# Checking results of total
+wos_scopus_total_annual_production_dummy <- 
+  total_anual_production |> 
+  dplyr::rename(n_total = n,
+                ref_type_total = ref_type) |> 
+  left_join(wos_anual_production |> 
+              dplyr::rename(n_wos = n,
+                            ref_type_wos = ref_type) ) |> 
+  left_join(scopus_anual_production |> 
+              dplyr::rename(n_scopus = n,
+                            ref_type_scopus = ref_type)) |> 
+  mutate(total = if_else(n_total < n_wos | n_total < n_scopus, 
+                         n_scopus, # it could be improved
+                         n_total)) |> 
+  replace_na(list(n_wos = 0, 
+                  n_scopus = 0, 
+                  total = 0,
+                  ref_type_wos = "wos",
+                  ref_type_scopus = "scopus"))
+
+wos_scopus_total_annual_production_total <- 
+  wos_scopus_total_annual_production_dummy |> 
+  select(PY, 
+         n = total,
+         ref_type = ref_type_total)
+
+wos_scopus_total_annual_production_scopus <- 
+  wos_scopus_total_annual_production_dummy |> 
+  select(PY, 
+         n = n_scopus,
+         ref_type = ref_type_scopus)
+
+wos_scopus_total_annual_production_wos <- 
+  wos_scopus_total_annual_production_dummy |> 
+  select(PY, 
+         n = n_wos,
+         ref_type = ref_type_wos)
+
+wos_scopus_total_annual_production <- 
+  wos_scopus_total_annual_production_total |> 
+  bind_rows(wos_scopus_total_annual_production_scopus,
+            wos_scopus_total_annual_production_wos) 
+
+figure_1_data <-
+  wos_scopus_total_annual_production |>
+  mutate(PY = replace_na(PY, replace = 0)) |>
+  pivot_wider(names_from = ref_type,
+              values_from = n) |>
+  arrange(desc(PY)) |> 
+  mutate(total = scopus + wos) 
+
+# Creating the range of missing years
+
+range_tbl <- 
+  tibble(PY = range(figure_1_data$PY)[1]:range(figure_1_data$PY)[2]) |> 
+  mutate(PY = as.numeric(PY))
+
+figure_1_data_all_years <- 
+  figure_1_data |> 
+  right_join(range_tbl) |> 
+  mutate(across(everything(), ~replace_na(.x, 0)))
+```
+
+I would like to create a bar graph of WoS and Scopus data
+
+We need to identify the times cited variable for each database and later sum them all.
+
+Time Cited from web of science
+
+```{r}
+TC_wos <- 
+  data_consiliada_full_79 |> 
+  filter(ref_type == "wos") |> 
+  dplyr::select(PY, TC) |> 
+  dplyr::group_by(PY) |> 
+  dplyr::summarise(TC_sum = sum(TC)) |> 
+  arrange(desc(PY)) |> 
+  na.omit() 
+```
+
+Time Cited from WoS
+
+```{r}
+TC_scopus <- 
+  data_consiliada_full_79 |> 
+  filter(ref_type == "scopus") |> 
+  dplyr::select(PY, TC) |> 
+  dplyr::group_by(PY) |> 
+  dplyr::summarise(TC_sum = sum(TC)) |> 
+  arrange(desc(PY)) |> 
+  na.omit() 
+```
+
+Time cited all
+
+```{r}
+TC_all <- 
+  TC_scopus |> 
+  left_join(TC_wos, 
+            by = "PY", 
+            suffix = c("_wos", 
+                       "_scopus")) |> 
+  replace_na(replace = list(TC_sum_scopus = 0)) |> 
+  mutate(TC_sum_all = TC_sum_wos + TC_sum_scopus,
+         TC_total = sum(TC_sum_all),
+         TC_percentage = round(TC_sum_all/TC_total, digits = 2)) |> 
+  select(PY, TC_sum_all, TC_percentage) |> 
+  # filter(PY != 2022) |>
+  # filter(PY >= 2000) |> 
+  arrange(desc(PY))
+```
+
+# Descriptive Analysis
+
+## Scientific Production
+
+## Figure 1a - Scopus + WoS
+
+Probando una nueva opción
+
+```{r}
+figure_1_all <- 
+data_consilidada_1 |> 
+  select(ID_TOS = name, year, ref_type) |> 
+  left_join(scopus_man_found |> 
+              select(ID_TOS) |> 
+              mutate(scopus = "scopus"), by = "ID_TOS") |> 
+  mutate(ref_type = if_else(is.na(ref_type) , 
+                            scopus, ref_type )) |> 
+  select(-scopus) |> 
+  mutate(ref_type = if_else(is.na(ref_type), "other", ref_type))
+
+```
+
+
+```{r}
+
+
+
+figure_1a <- 
+  figure_1_data_all_years |> 
+  pivot_longer(!PY, names_to = "ref_type", values_to = "n") |> 
+  filter(ref_type != "total") |> 
+  ggplot(aes(x = factor(PY), 
+             y = n, 
+             fill = ref_type)) +
+  geom_bar(stat = "identity", 
+           position = "dodge") +
+  geom_text(aes(label = n),
+            vjust = -0.3,
+            position = position_dodge(0.9),
+            size = 3,
+            family = "Times") +
+  scale_fill_manual(values = c("springgreen3",
+                               "orange3")) +
+  theme(text = element_text(family = "Times",
+                            face = "bold",
+                            size =12),
+        panel.background = element_rect(fill = "white"),
+        legend.position = "bottom",
+        legend.title = element_text(size = 0),
+        axis.text.x = element_text(face = "bold", 
+                                   angle = 45, 
+                                   vjust = 0.5),
+        axis.line = element_line(color = "black", 
+                                 size = 0.2)) +
+  labs(y = "Number of publications", 
+       x = "Year") 
+
+figure_1a
+```
+
+```{r}
+data_consilidada |> 
+  select(year) |> 
+  group_by(year) |> 
+  count() |> 
+  ggplot(aes(x = factor(year),
+             y = n, 
+             group = 1)) +
+  geom_line(stat = "identity") +
+  geom_point() 
+```
+
+## Country analysis
+
+## Table 2 - Country production
+
+```{r}
+wos_scopus_countries <- 
+  data_consiliada_full_79 |> 
+  select(SR, AU_CO, TC) |> 
+  separate_rows(AU_CO, sep = ";") |> 
+  unique() |> 
+  drop_na()
+
+wos_scopus_countries_journals <- 
+  wos_scopus_countries |> 
+  left_join(wos_scopus_tos$df |> 
+              select(SR, SO, PY), 
+            by = "SR")
+
+scimago_2020 <- 
+  read_csv2("data/scimago2020.csv") |> 
+  select(SO = Title,
+         quartile = "SJR Best Quartile") |> 
+  mutate(PY = 2020)
+
+scimago_2021 <- 
+  read_csv2("data/scimago2020.csv") |> 
+  select(SO = Title,
+         quartile = "SJR Best Quartile") |> 
+  mutate(PY = 2021)
+
+scimago_2020_2021 <- 
+  scimago_2020 |> 
+  bind_rows(scimago_2021) |> 
+  select(PY, SO, quartile)
+
+scimago <- 
+  sjr_journals |> 
+  select(PY = year, 
+         SO = title,
+         quartile = sjr_best_quartile) |> 
+  mutate(SO = str_to_upper(SO),
+         PY = as.numeric(PY)) |> 
+  bind_rows(scimago_2020_2021)
+
+wos_scopus_countries_journals_scimago <- 
+  wos_scopus_countries_journals |> 
+  left_join(scimago, by = c("PY", "SO")) |>  
+  drop_na() |> 
+  select(AU_CO, TC, quartile) |> 
+  filter(quartile != "-")
+```
+
+### Table 2a - production
+
+Production per country
+
+```{r}
+table_2a <- 
+  wos_scopus_countries |> 
+  select(AU_CO) |> 
+  group_by(AU_CO) |> 
+  summarise(count_co = n()) |> 
+  mutate(percentage_co = count_co / sum(count_co) * 100,
+         percentage_co = round(percentage_co, digits = 2)) |> 
+  arrange(desc(count_co))
+table_2a 
+```
+
+Total percentage of the top 10 Countries
+
+```{r}
+table_2a |> 
+  slice(1:10) |> 
+  select(percentage_co) |> 
+  summarise(total_sum_per = sum(percentage_co)) |> 
+  pull()
+```
+
+### Table 2b - citations
+
+Citations received per country
+
+```{r}
+table_2b <- 
+  wos_scopus_countries_journals_scimago |> 
+  select(AU_CO, TC) |> 
+  group_by(AU_CO) |> 
+  summarise(citation = sum(TC)) |> 
+  mutate(percentage_ci = citation / sum(citation) * 100) |> 
+  arrange(desc(citation))
+table_2b
+```
+
+Total percentage of citation of the top 10 countries
+
+```{r}
+table_2b |> 
+  slice(1:10) |> 
+  select(percentage_ci) |> 
+  summarise(total_sum_per = sum(percentage_ci)) |> 
+  pull()
+```
+
+### Table 2c - Quartiles
+
+```{r}
+table_2c <- 
+  wos_scopus_countries_journals_scimago |> 
+  select(AU_CO, quartile) |> 
+  group_by(AU_CO) |> 
+  count(quartile, sort = TRUE) |> 
+  pivot_wider(names_from = quartile, 
+              values_from = n) |> 
+  select(AU_CO, Q1, Q2, Q3, Q4) |> 
+  mutate(Q1 = replace_na(Q1, 0),
+         Q2 = replace_na(Q2, 0),
+         Q3 = replace_na(Q3, 0),
+         Q4 = replace_na(Q4, 0))
+table_2c
+```
+
+### Table 2 - Final
+
+Merging all tables 2
+
+```{r}
+table_2 <- 
+  table_2a |> 
+  left_join(table_2b, by = "AU_CO") |> 
+  left_join(table_2c, by = "AU_CO") |> 
+  slice(1:10)
+table_2 |> 
+  filter(!is.na(AU_CO))
+```
+
+## Figure 2 - Country Collaboration
+
+Exporting data to biblioshiny
+
+```{r}
+write.xlsx(x = wos_scopus_tos$df, file = "output/wos_scopus.xlsx")
+```
+

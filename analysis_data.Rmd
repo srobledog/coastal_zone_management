@@ -1,0 +1,61 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Creamos el ambiente 
+
+```{r}
+library(tidyverse)
+library(tidygraph)
+library(igraph)
+```
+
+
+```{r}
+regulat_data <- 
+  read_csv("https://docs.google.com/spreadsheets/d/16YinlCfY1zvBSagf1cihiODPPiHMRdGv/export?format=csv&gid=1675742360") |> 
+  mutate(type = "regulat")
+
+law_data <- 
+    read_csv("https://docs.google.com/spreadsheets/d/16YinlCfY1zvBSagf1cihiODPPiHMRdGv/export?format=csv&gid=1881728778") |> 
+  mutate(type = "law")
+
+legal_data <- 
+    read_csv("https://docs.google.com/spreadsheets/d/16YinlCfY1zvBSagf1cihiODPPiHMRdGv/export?format=csv&gid=1885446939") |> 
+  mutate(type = "legal")
+
+data_law_legal_regulat <- 
+  bind_rows(regulat_data,
+            law_data,
+            legal_data) |> 
+  select(name, type)
+
+rm(regulat_data, law_data, legal_data)
+```
+
+Getting network
+
+```{r}
+data_all <- 
+  read_graph("citation_network_full-CZM(19may).graphml", "graphml") |> 
+  as_tbl_graph() |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  left_join(data_law_legal_regulat) |> 
+  select(name, type)
+
+citation_network <- 
+  read_graph("citation_network_full-CZM(19may).graphml", "graphml") |> 
+  as_tbl_graph() |> 
+  activate(nodes) |>
+  left_join(data_all)
+```
+
+
+```{r}
+citation_network_full |> 
+  left_join(data_law_legal_regulat |> 
+              select(name, type), by = "name") |> View()
+```
+
