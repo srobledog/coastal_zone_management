@@ -15,6 +15,7 @@ library(journalabbr)
 library(openxlsx)
 library(lubridate)
 source("verbs.R")
+library(bibliometrix)
 ```
 
 # Preprocesamiento
@@ -24,20 +25,206 @@ source("verbs.R")
 Cargamos los datos que Camilo seleccionó. En total son 176 datos. 
 
 ```{r}
-data_consilidada <- 
-  read_csv("https://docs.google.com/spreadsheets/d/1iwBM_RY391OVuuK1XrXJdtDoVLim1BBJ/export?format=csv&gid=1070729370") 
+data_consilidada_174 <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1iwBM_RY391OVuuK1XrXJdtDoVLim1BBJ/export?format=csv&gid=1070729370") |> filter(!duplicated(name))
            
 ```
+Find data from Scopus 
+
+```{r}
+scopus_man_found_1 <- 
+  tosr::tosr_load("data/scopus_1_10.bib", 
+                  "data/scopus_11_20.bib",
+                  "data/scopus_31_40.bib",
+                  "data/scopus_41_50.bib",
+                  "data/scopus_51_60.bib",
+                  "data/scopus_61_70.bib",
+                  "data/scopus_71_80.bib",
+                  "data/scopus_81_90.bib",
+                  "data/scopus_91_100.bib",
+                  "data/scopus_111_120.bib",
+                  "data/scopus_121_123.bib", 
+                  "data/missing_97_74.bib",  # Second search
+                  "data/coastal_management.bib", # Initial data
+                  "data/coastal_management_1_500.txt", # Initial data
+                  "data/coastal_management_501_1000.txt", # Initial data
+                  "data/coastal_management_1001_1500.txt", # Initial data
+                  "data/coastal_management_1501_2000.txt", # Initial data
+                  "data/coastal_management_2001_2240.txt") # Initial data
+
+scopus_man_found <- 
+  scopus_man_found_1$df |> 
+  filter(!duplicated(ID_TOS))
+```
+
+Merging both datasets 
+
+```{r}
+data_consilidada_174_123_found <- 
+  data_consilidada_174 |> 
+  left_join(scopus_man_found_1$df, by = c("name" = "ID_TOS")) |> 
+  filter(!duplicated(name))
+```
+
+Organizing data for analysis
+
+```{r}
+reference_df <- 
+  get_references(data_consilidada_174_123_found)
+
+# country_df <- 
+#   get_country()
+
+journal_df <- 
+  get_journals(data_consilidada_174_123_found, reference_df)
+
+author_df <- 
+  get_authors(data_consilidada_174_123_found, reference_df)
+```
+
+
+```{r}
+wos_anual_production <- 
+  data_consilidada_174_123_found |>
+  filter(ref_type == "wos") |> 
+  select(PY) |> 
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit()  |> 
+  # filter(PY >= 2000,
+  #        PY < year(today())) |> 
+  mutate(ref_type = "wos")
+
+scopus_anual_production  <- 
+  data_consilidada_174_123_found |>
+  filter(ref_type == "scopus") |>
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  # filter(PY >= 2000,
+  #        PY < year(today())) |>
+  mutate(ref_type = "scopus")
+
+total_anual_production <- 
+  data_consilidada_174_123_found |> 
+  select(PY) |> 
+  dplyr::count(PY, sort = TRUE) |> 
+  na.omit() |> 
+  # filter(PY >= 2000,
+  #        PY < year(today())) |>
+  mutate(ref_type = "total") |> 
+  arrange(desc(PY))
+
+range_years <- 
+  range(min(wos_anual_production$PY), max(scopus_anual_production$PY))
+
+range_years_tbl <- 
+  tibble(PY = range_years[1]:range_years[2]) |> 
+  mutate(PY = as.numeric(PY))
+
+wos_anual_production_total <- 
+  wos_anual_production |> 
+  right_join(range_years_tbl) |> 
+  replace_na(replace = list(n = 0))|> 
+  mutate(ref_type = "wos")
+
+scopus_anual_production_total <- 
+  scopus_anual_production |> 
+  right_join(range_years_tbl) |> 
+  replace_na(replace = list(n = 0))|> 
+  mutate(ref_type = "scopus")
+
+total_anual_production_total <- 
+  total_anual_production |> 
+  right_join(range_years_tbl) |> 
+  replace_na(replace = list(n = 0))|> 
+  mutate(ref_type = "total")
+  
+wos_scopus_total_annual_production <- 
+  wos_anual_production_total |> 
+  bind_rows(scopus_anual_production_total,
+            total_anual_production_total) 
+
+figure_1_data <-
+  wos_scopus_total_annual_production |>
+  mutate(PY = replace_na(PY, replace = 0)) |>
+  pivot_wider(names_from = ref_type,
+              values_from = n) |>
+  arrange(desc(PY))
+```
+
+Time Cited from web of science
+
+```{r}
+TC_wos <- 
+  data_consilidada_174_123_found |>
+  filter(ref_type == "wos") |> 
+  dplyr::select(PY, TC) |> 
+  dplyr::group_by(PY) |> 
+  dplyr::summarise(TC_sum = sum(TC)) |> 
+  arrange(desc(PY)) |> 
+  na.omit() |> 
+  ungroup() |> 
+  right_join(range_years_tbl) |> 
+  replace_na(replace = list(TC_sum = 0))
+```
+
+Time Cited from WoS
+
+```{r}
+TC_scopus <- 
+  data_consilidada_174_123_found |>
+  filter(ref_type == "scopus") |> 
+  dplyr::select(PY, TC) |> 
+  dplyr::group_by(PY) |> 
+  dplyr::summarise(TC_sum = sum(TC)) |> 
+  arrange(desc(PY)) |> 
+  na.omit() |> 
+  right_join(range_years_tbl) |> 
+  replace_na(replace = list(TC_sum = 0)) 
+```
+
+Time cited all
+
+```{r}
+TC_all <- 
+  TC_scopus |> 
+  left_join(TC_wos, 
+            by = "PY", 
+            suffix = c("_wos", 
+                       "_scopus")) |> 
+  replace_na(replace = list(TC_sum_scopus = 0)) |> 
+  mutate(TC_sum_all = TC_sum_wos + TC_sum_scopus,
+         TC_total = sum(TC_sum_all),
+         TC_percentage = round(TC_sum_all/TC_total, digits = 2)) |> 
+  select(PY, TC_sum_all, TC_percentage) |> 
+  # filter(PY != 2022) |>
+  # filter(PY >= 2000) |> 
+  arrange(desc(PY)) |> 
+  right_join(range_years_tbl) |> 
+  replace_na(replace = list(TC_sum = 0))
+```
+
+
+# Analysis data
+
+## Annual Scientific production 
+
+```{r}
+
+```
+
+
+
+# Other 
 
 ## Organizando los datos
 
 A estos datos les hace falta toda la información que se extrae de WoS y Scopus. 
-Tenemos algunos datos en las consultas iniciales de WoS u Scopus. Por lo que, 
+Tenemos algunos datos en las consultas iniciales de WoS o Scopus. Por lo que, 
 pegamos estos datos al data set de Camilo (data_consiliada). 
 
 ```{r}
-data_consilidada_1 <- 
-  data_consilidada |> 
+data_consilidada_174_55_found <- 
+  data_consilidada_174 |> 
   left_join(wos_scopus_tos$df, by = c("name" = "ID_TOS")) |> 
   filter(!duplicated(name))
 ```
@@ -47,49 +234,139 @@ En este dataset si está el AU_CO que necesitamos para hacer los análisis descr
 Seleccionando los datos que faltan
 
 ```{r}
-data_consilidada_2 <- 
-  data_consilidada_1 |> 
+data_consilidada_174_119_missing <- 
+  data_consilidada_174_55_found |> 
   filter(is.na(AU)) |> 
   select(name, full_name)
-```
-
-Con los datos que faltan, extraer el título para buscarlo en Scopus y WoS 
-
-```{r}
-data_consolidada_2_titles <- 
-  data_consilidada |> 
-  get_titles() |> 
-  select(TI) |> 
-  na.omit()
 ```
 
 Leyendo los datos de Scopus que se encontraron a partir de los títulos
 
 ```{r}
-# scopus_encontrados <- 
-#   tosr::tosr_load("data/scopus_1_10.bib")
+# scopus_man_found_1 <- 
+#   tosr::tosr_load("data/scopus_1_10.bib", 
+#                   "data/scopus_11_20.bib",
+#                   "data/scopus_31_40.bib",
+#                   "data/scopus_41_50.bib",
+#                   "data/scopus_51_60.bib",
+#                   "data/scopus_61_70.bib",
+#                   "data/scopus_71_80.bib",
+#                   "data/scopus_81_90.bib",
+#                   "data/scopus_91_100.bib",
+#                   "data/scopus_111_120.bib",
+#                   "data/scopus_121_123.bib",
+#                   "data/missing_97_74.bib",
+#                   "data/coastal_management.bib", # Initial data
+#                   "data/coastal_management_1_500.txt", # Initial data
+#                   "data/coastal_management_501_1000.txt", # Initial data
+#                   "data/coastal_management_1001_1500.txt", # Initial data
+#                   "data/coastal_management_1501_2000.txt", # Initial data
+#                   "data/coastal_management_2001_2240.txt") # Initial data
+
+# scopus_man_found_1_87 <- 
+#   scopus_man_found_1$df
 # 
-# scopus_encontrados <- 
-#   bibliometrix::convert2df(file = "data/coastal_management.bib", 
-#                            dbsource = "scopus", 
-#                            format = "bibtex")
+# scopus_man_found_2_28 <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1iwBM_RY391OVuuK1XrXJdtDoVLim1BBJ/export?format=csv&gid=1360214247")|> 
+#   mutate(PN = as.character(PN),
+#          VL = as.character(VL))
+# 
+# scopus_man_found <- 
+#   scopus_man_found_1_87 |> 
+#   bind_rows(scopus_man_found_2_28) 
 
-scopus_man_found <- 
-  read_csv("data/scopus_encontrados.csv")
 
-data_consilidada_full_36 <- 
-  data_consilidada_2 |> 
-  left_join(scopus_man_found, 
-            by = c("name" = "ID_TOS")) |> 
-  filter(!is.na(AU))
+# data_consolidada_174_119_63_found <- 
+#   data_consilidada_174_119_missing |> 
+#   left_join(scopus_man_found_1_87, by = c("name" = "ID_TOS")) |> 
+#   filter(!is.na(AU))
+# 
+# data_consolidada_174_119_56_missing <- 
+#   data_consilidada_174_119_missing |> 
+#   left_join(scopus_man_found_1_87, by = c("name" = "ID_TOS")) |> 
+#   filter(is.na(AU))
 
-data_consilidada_missing_97 <- 
-  data_consilidada_2 |> 
-  left_join(scopus_man_found, 
-            by = c("name" = "ID_TOS")) |> 
-  filter(is.na(AU))
+# data_consolidada_176_126_67_missing |> 
+#   mutate(year = str_extract(name, "[0-9]{4}")) |> 
+#   select(name, full_name, year) |> 
+#   write_csv("data/data_consolidada_176_126_67_missing.csv")
+
+# scopus_man_found_2_28 <- 
+#   tosr::tosr_load("data/missing_67_found_28.bib")
+
+# scopus_man_found_2_28 <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1iwBM_RY391OVuuK1XrXJdtDoVLim1BBJ/export?format=csv&gid=1360214247")
+# 
+# data_consolidada_176_56_40_missing <- 
+#   data_consolidada_174_119_56_missing |> 
+#   select(name, full_name) |>  
+#   left_join(scopus_man_found_2_28, by = c("name" = "ID_TOS")) |> 
+#   filter(is.na(AU))
+
+# scopus_man_found <- 
+#   read_csv("data/scopus_encontrados.csv")
+
+# data_consilidada_full_36 <- 
+#   data_consilidada_2 |> 
+#   left_join(scopus_man_found, 
+#             by = c("name" = "ID_TOS")) |> 
+#   filter(!is.na(AU))
+# 
+# data_consilidada_missing_97 <- 
+#   data_consilidada_2 |> 
+#   left_join(scopus_man_found, 
+#             by = c("name" = "ID_TOS")) |> 
+#   filter(is.na(AU))
 
 ```
+
+Merging the 119 missing values with Scopus found dataset. 
+
+```{r}
+data_consolidada_174_123_found <- 
+  data_consilidada_174 |> 
+  left_join(scopus_man_found, by = c("name" = "ID_TOS")) |> 
+  filter(!is.na(AU))
+```
+
+
+```{r}
+# data_consilidada_174_55_found <- 
+#   data_consilidada_174 |> 
+#   left_join(scopus_man_found_1_87, 
+#             by = c("name" = "ID_TOS")) |> 
+#   filter(!duplicated(name))
+
+```
+
+
+Merging whole data with found data in scopus 
+
+```{r}
+data_consilidada_174_55_found |> select(-subfield, -year, -"...5", "ref_type") |> names()
+select("name",      "full_name", "AU",        "ID",         "C1",        "CR",       "JI",         "AB",      "RP",
+       "PA",        "AR",        "RP",        "DT",        "DI",        "FU",        "SN",        "SO",        "LA",
+       "TC",        "PN" ,       "PU",        "PM",        "DB",        "TI",        "VL",        "PY",        "FX",
+       "AU_UN",     "AU1_UN",    "AU_UN_NR",  "SR_FULL",   "SR",        "AU_CO")
+```
+
+
+```{r}
+data_consolidada_174_119_84_found |> names() 
+select("name",      "full_name", "AU",        "ID",        "C1"  ,      "CR"   ,     "JI"   ,     "AB"     ,   "RP"      , 
+       "DT"    ,    "DI"  ,      "SN"   ,     "SO"    ,    "LA"    ,    "TC"  ,      "PN"  ,      "PP" ,       "PU"  ,     
+       "DB"    ,    "TI"   ,     "url"  ,     "VL"     ,   "PY"   ,     "AU_UN"   ,  "AU1_UN" ,   "AU_UN_NR" , "SR_FULL"  ,
+       "SR"    ,    "AU_CO"   ,  "ref_type" , "DE"  ,      "PA" ,       "AR"   ,     "coden" ,    "FU"    ,    "BN"  ,     
+       "PM"    ,    "sponsors" , "FX" ,       "SR_TOS")
+```
+
+Tidying data 
+
+```{r}
+data_consilidada_174_55_found |> select(-subfield, -year, -"...5")
+```
+
+
 
 Merging scopus with scopus found
 
@@ -115,6 +392,53 @@ data_consolidada_97_missing <-
   data_consiliada_full_79 |> 
   
 ```
+
+Finding missing values 79
+
+```{r}
+data_consolidada_97_missing_format <- 
+  data_consilidada_missing_97 |> 
+  mutate(year = str_extract(name, "[0-9]{4}"))
+
+data_consolidada_97_missing_format |> 
+  select(name, full_name, year) |> 
+  write_csv("data/data_consolidada_97_missing.csv")
+
+data_consolidada_176_126_68_missing |> 
+  mutate(year = str_extract(name, "[0-9]{4}")) |> 
+  select(name, full_name, year) |> 
+  write_csv("data/data_consolidada_176_126_68_missing.csv")
+
+```
+
+We found through manually search in Scopus
+
+```{r}
+scopus_missing_97_74 <- 
+  tosr::tosr_load("data/missing_97_74.bib")
+
+data_consolidada_97_74 <- 
+  data_consilidada_missing_97 |> 
+  select(name, full_name) |> 
+  left_join(scopus_missing_97_74$df, by = c("name" = "ID_TOS")) |> 
+  filter(!duplicated(name))
+
+data_missing_97_66 <- 
+  data_consolidada_97_74 |> 
+  filter(is.na(AU))
+
+data_full_97_ <- 
+  data_consolidada_97_74 |> 
+  filter(!is.na(AU))
+
+```
+
+Merging full data 
+
+```{r}
+
+```
+
 
 
 ```{r}
@@ -479,4 +803,3 @@ Exporting data to biblioshiny
 ```{r}
 write.xlsx(x = wos_scopus_tos$df, file = "output/wos_scopus.xlsx")
 ```
-
