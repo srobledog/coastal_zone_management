@@ -1,0 +1,1405 @@
+---
+title: "CZM - Scientometric Analysis"
+author: "Sebastian Robledo"
+date: "9/12/2022"
+output: 
+  html_document:
+            toc: TRUE
+            toc_float: TRUE
+            code_folding: hide
+---
+```{r}
+
+```
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(dev = 'svg') # set output device to svg
+
+```
+
+# Creating the environment
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidygraph)
+library(tidytext)
+library(igraph)
+library(bibliometrix)
+library(tosr)
+library(here)
+library(lubridate)
+library(sjrdata)
+library(openxlsx)
+library(zoo)
+library(RSQLite)
+library(journalabbr)
+library(ggraph)
+library(openxlsx)
+library(XML)
+library(plyr)
+source("verbs.R")
+library(RColorBrewer)
+library(wordcloud)
+# library(ggthemes)
+# library(extrafont)
+# library(remotes)
+# remotes::install_version("Rttf2pt1", version = "1.3.8")
+# extrafont::font_import()
+
+giant.component <- function(graph) {
+  cl <- igraph::clusters(graph)
+  igraph::induced.subgraph(graph, 
+                           which(cl$membership == which.max(cl$csize)))
+}
+```
+
+# Data getting
+
+```{r message=FALSE, warning=FALSE}
+wos_scopus <- #ok
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=1535289313") |> 
+  filter(!is.na(AU))
+
+ToS <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=2132528010")
+
+# wos <-
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=849275704")  # create dataframe from wos file
+
+# scopus <-
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=560156967")
+
+reference_df <-
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=270496836")
+
+# journal_df <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=686001397")
+
+AU_links <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=640727835")
+
+# figure_1_data <- # ok
+#   read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=1442849006")
+
+# TC_all <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=1096651366")
+
+# table_2 <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=1805154497")
+
+# figure_2_countries_wos_scopus_1 <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=388025682") |> 
+#   tidygraph::as_tbl_graph(directed = FALSE) |> 
+#   activate(nodes) |> 
+#   dplyr::mutate(community = tidygraph::group_louvain(),
+#                 degree = tidygraph::centrality_degree(),
+#                 community = as.factor(community))
+
+# figure_2_AU_CO_time <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1PGRAZv6FLhBQD7dct0mIZ_pa4LNBw05Mk-WtfI3Vjxk/export?format=csv&gid=774818804")
+
+# table_3_journal  <-  # table_3_journal
+#   read_csv("https://docs.google.com/spreadsheets/d/1kkuLjeWK44WfTbPfsVsvoiSksRDoLHXY/export?format=csv&gid=1076593220")
+
+# wos_scopus_authors  <- 
+#   read_csv("https://docs.google.com/spreadsheets/d/1kkuLjeWK44WfTbPfsVsvoiSksRDoLHXY/export?format=csv&gid=1994870037")
+
+AU_CO_df <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=1136105302")
+
+AU_CO_links <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=1134821228")
+
+SO_links <- 
+  read_csv("https://docs.google.com/spreadsheets/d/1nwszUhhHBzJS1WA0aP5lVMZY_lEVxjT4QO1l3bKiVtE/export?format=csv&gid=1871024023") |> 
+  dplyr::filter(!stringr::str_detect(string = JI_ref, 
+                                     pattern = ".*[0-9]{4}"))
+```
+
+# Resutls
+
+## ToS - word cloud
+
+### Branch 1
+
+```{r}
+pal <- brewer.pal(8,"Dark2")
+ToS |> 
+  filter(ToS == "rama 1") |> 
+  select(TI) |> 
+  unnest_tokens(output = word,
+                input = TI) |> 
+  dplyr::anti_join(stop_words) |> 
+  dplyr::count(word, sort = TRUE) |> 
+  dplyr::filter(word != "coastal",
+                word != "management",
+                word != "zone",
+                word != "program",
+                word != "u.s") |> 
+  with(wordcloud(word,
+                 n,random.order = FALSE,
+                 max.words = 50,
+                 colors = pal))
+```
+### Branch 2
+
+```{r}
+ToS |> 
+  filter(ToS == "rama 2") |> 
+  select(TI) |> 
+  unnest_tokens(output = word,
+                input = TI) |> 
+  dplyr::anti_join(stop_words) |> 
+  dplyr::count(word, sort = TRUE) |>
+  dplyr::filter(word != "coastal",
+                word != "management",
+                word != "zone",
+                word != "program",
+                word != "u.s") |> 
+  with(wordcloud(word,
+                 n,
+                 random.order = FALSE,
+                 min.freq = 2,
+                 max.words = 50,
+                 colors = pal))
+```
+
+### Branch 3
+
+```{r}
+ToS |> 
+  filter(ToS == "rama 3") |> 
+  select(TI) |> 
+  unnest_tokens(output = word,
+                input = TI) |> 
+  dplyr::anti_join(stop_words) |> 
+  dplyr::count(word, sort = TRUE) |>
+  dplyr::filter(word != "coastal",
+                word != "management",
+                word != "zone",
+                word != "program",
+                word != "u.s") |> 
+  with(wordcloud(word,
+                 n,
+                 random.order = FALSE,
+                 min.freq = 2,
+                 max.words = 50,
+                 colors = pal))
+```
+
+## 3.1 Scientific Production
+
+### Figure 1a - Scopus + WoS
+
+#### Data
+
+Converting data from Google sheet file
+
+```{r}
+range_tbl <- 
+  tibble(PY = range(wos_scopus$PY)[1]:range(wos_scopus$PY)[2])
+
+total_anual_production <-
+  wos_scopus |>
+  tidyr::drop_na(ref_type) |> 
+  dplyr::select(PY) |>
+  dplyr::count(PY, sort = TRUE) |>
+  na.omit() |> 
+  # dplyr::filter(PY >= 2000,
+  #               PY < year(today())) |>
+  # dplyr::arrange(desc(PY))
+  right_join(range_tbl) |> 
+  replace_na(list(n = 0)) |> 
+  dplyr::mutate(ref_type = "total")
+
+total_anual_production |> 
+  DT::datatable(class = "cell-border stripe", 
+                rownames = F, 
+                filter = "top", 
+                editable = FALSE, 
+                extensions = "Buttons", 
+                options = list(dom = "Bfrtip",
+                               buttons = c("copy",
+                                           "csv",
+                                           "excel", 
+                                           "pdf", 
+                                           "print")))
+```
+
+```{r}
+figure_1a <- 
+  total_anual_production |> 
+  ggplot(aes(x = factor(PY), 
+             y = n)) +
+  geom_bar(stat = "identity", 
+           position = "dodge",
+           color = "springgreen3",
+           fill = "springgreen3") +
+  geom_text(aes(label = n),
+            vjust = -0.3,
+            position = position_dodge(0.9),
+            size = 3,
+            family = "Times") +
+  # scale_fill_manual(values = "springgreen3") +
+  theme(
+        # text = element_text(family = "Serif",
+        #                     face = "bold",
+        #                     size =12),
+        panel.background = element_rect(fill = "white"),
+        legend.position = "bottom",
+        legend.title = element_text(size = 0),
+        axis.text.x = element_text(face = "bold",
+                                   angle = 45,
+                                   vjust = 0.5),
+        axis.line = element_line(color = "black",
+                                 size = 0.2)) +
+  labs(y = "Number of publications", 
+       x = "Year") 
+
+figure_1a
+```
+
+### Figure 1b - Total Citations
+
+#### Data
+
+Creating data
+
+```{r}
+TC_all <-
+  wos_scopus |> 
+  dplyr::select(PY, TC) |>
+  dplyr::group_by(PY) |>
+  dplyr::summarise(TC_sum = sum(TC)) |>
+  arrange(desc(PY)) |>
+  na.omit() |> 
+  dplyr::right_join(range_tbl) |> 
+  tidyr::replace_na(list(TC_sum = 0))
+
+TC_all |> 
+  DT::datatable(class = "cell-border stripe", 
+                rownames = F, 
+                filter = "top", 
+                editable = FALSE, 
+                extensions = "Buttons", 
+                options = list(dom = "Bfrtip",
+                               buttons = c("copy",
+                                           "csv",
+                                           "excel", 
+                                           "pdf", 
+                                           "print")))
+```
+
+Figure
+
+```{r}
+figure_1c <- 
+  TC_all |> 
+  ggplot(aes(x = PY , y = TC_sum)) +
+  geom_line(stat = "identity", color = "purple") +
+  geom_point(color = "purple") +
+  scale_x_continuous(breaks = seq(1974, year(today()) , by = 1)) +
+  geom_text(aes(label = TC_sum),
+            vjust = -0.3,
+            position = position_dodge(0.9),
+            size = 3,
+            family = "Times",
+            color = "purple") +
+  scale_fill_manual(values = c("springgreen3",
+                               "orange3")) +
+  theme(text = element_text(family = "Times",
+                            face = "bold",
+                            size =12),
+        panel.background = element_rect(fill = "white"),
+        legend.position = "bottom",
+        legend.title = element_text(size = 0),
+        axis.text.x = element_text(face = "bold",
+                                   angle = 45,
+                                   vjust = 0.5),
+        axis.line = element_line(color = "black",
+                                 size = 0.2)) +
+labs(y = "Number of citations", 
+     x = "Year") 
+figure_1c
+```
+
+
+## 3.2 Country analysis
+
+### Table 2 - Country production
+
+```{r}
+wos_scopus_countries <-
+  wos_scopus |>
+  select(SR, AU_CO, TC, quartile) |>
+  separate_rows(AU_CO, sep = ";") |> 
+  unique() |>
+  dplyr::filter(!is.na(AU_CO))
+
+# wos_scopus_countries_journals <-
+#   wos_scopus_countries |>
+#   left_join(wos_scopus |>
+#               select(SR, SO, PY),
+#             by = "SR")
+
+table_2a_production <- 
+  wos_scopus_countries |> 
+  dplyr::select(AU_CO) |> 
+  dplyr::group_by(AU_CO) |> 
+  dplyr::summarise(count_co = n()) |> 
+  dplyr::mutate(percentage_co = count_co / sum(count_co) * 100,
+                percentage_co = round(percentage_co, digits = 2)) |> 
+  dplyr::arrange(desc(count_co))
+
+
+table_2b_citation <- 
+  wos_scopus_countries |> 
+  select(AU_CO, TC) |>
+  separate_rows(AU_CO, sep = ";") |>
+  dplyr::group_by(AU_CO) |> 
+  dplyr::summarise(citation = sum(TC)) |> 
+  dplyr::mutate(percentage_ci = citation / sum(citation) * 100) |> 
+  dplyr::arrange(desc(citation))
+
+table_2c_quality <- 
+  wos_scopus_countries |> 
+  dplyr::group_by(AU_CO) |> 
+  dplyr::count(quartile, sort = TRUE) |> 
+  pivot_wider(names_from = quartile, 
+              values_from = n) |> 
+  dplyr::select(AU_CO, Q1, Q2, Q3, Q4) |> 
+  dplyr::mutate(Q1 = replace_na(Q1, 0),
+                Q2 = replace_na(Q2, 0),
+                Q3 = replace_na(Q3, 0),
+                Q4 = replace_na(Q4, 0))
+
+table_2 <- 
+  table_2a_production |> 
+  left_join(table_2b_citation, by = "AU_CO") |> 
+  left_join(table_2c_quality, by = "AU_CO") |> 
+  tidyr::drop_na() |> 
+  mutate(percentage_ci = round(percentage_ci, digits = 2),
+         no_category = count_co - (Q1 + Q2 + Q3 + Q4)) 
+
+table_2 |>
+  DT::datatable(class = "cell-border stripe", 
+                rownames = F, 
+                filter = "top", 
+                editable = FALSE, 
+                extensions = "Buttons", 
+                options = list(dom = "Bfrtip",
+                               buttons = c("copy",
+                                           "csv",
+                                           "excel", 
+                                           "pdf", 
+                                           "print")))
+```
+
+### Figure 2a - Country Collaboration
+
+```{r}
+edgelist_countries_weighted <- 
+  AU_CO_links |>
+  dplyr::select(from, to) |>
+  dplyr::group_by(from, to) |>
+  dplyr::count(from, to) |>
+  dplyr::filter(from != to) |>
+  dplyr::rename(weight = n) |>
+  tidygraph::as_tbl_graph(directed = FALSE) |>
+  activate(nodes) |>
+  # edgelist_wos_scopus_countries_weighted_properties |> 
+  dplyr::mutate(community = tidygraph::group_louvain(),
+                degree = tidygraph::centrality_degree(),
+                community = as.factor(community))
+
+figure_2a_graph <- 
+  edgelist_countries_weighted |> 
+  ggraph(layout = "graphopt") +
+  geom_edge_link(aes(width = weight),
+                 colour = "lightgray") +
+  scale_edge_width(name = "Link strength") +
+  geom_node_point(aes(color = community, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  scale_size(name = "Degree") +
+  # scale_color_binned(name = "Communities") +
+  theme_graph()
+
+figure_2a_graph
+```
+
+### Figure 2b - Country Collaboration
+
+```{r}
+figure_2b_cluster <- 
+  edgelist_countries_weighted |> 
+  activate(nodes) |> 
+  data.frame() |> 
+  group_by(community) |> 
+  dplyr::count(community, sort = TRUE) |> 
+  # mutate(community = as.factor(community)) |> 
+  slice(1:10) |>  
+  ggplot(aes(x = fct_reorder(community, n), y = n)) +
+  geom_point(stat = "identity") +
+  geom_line(group = 1) + 
+  # geom_text(label = as.numeric(community),
+  #           nudge_x = 0.5,
+  #           nudge_y = 0.5,
+  #           check_overlap = T) +
+  labs(title = "Communities by size", 
+       x = "communities", 
+       y = "Countries") +
+  geom_text(aes(label = n),
+            vjust = -0.3,
+            position = position_dodge(0.9),
+            size = 5,
+            family = "Times" 
+            # color = "purple"
+            ) +
+  theme(text = element_text(color = "black",
+                            face = "bold",
+                            family = "Times New Roman"),
+        plot.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white"), 
+        axis.text.y = element_text(size = 15, 
+                                   colour = "black"),
+        axis.text.x = element_text(size = 15,
+                                   colour = "black"),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20)) 
+
+figure_2b_cluster
+```
+
+### Figure 2c Longitudinal data of AU_CO
+
+```{r}
+range_tbl_fig_2 <- 
+  tibble(PY = range(AU_CO_links$PY)[1]:range(AU_CO_links$PY)[2])
+# Create a dataframe with links 
+figure_2c_cluster_edges <- 
+  AU_CO_links |>
+  dplyr::filter(from != to) |> 
+  tidygraph::as_tbl_graph() |> 
+  activate(edges) |> 
+  as_tibble() |> 
+  dplyr::select(year = PY) |> 
+  dplyr::count(year) |> 
+  dplyr::filter(year >= 2000,
+                year <= 2020) |> 
+  dplyr::mutate(percentage = n/max(n)) |> 
+  dplyr::select(year, percentage) |> 
+  dplyr::right_join(range_tbl_fig_2, 
+                    by = c("year" = "PY")) |> 
+  tidyr::replace_na(list(percentage = 0)) 
+# Create a data frame with author and year 
+figure_2c_cluster_nodes <- # 21 row 
+  AU_CO_links |>
+  dplyr::filter(from != to) |> 
+  tidygraph::as_tbl_graph() |> 
+  activate(edges) |> 
+  as_tibble() |> 
+  dplyr::select(CO = from, 
+                year = PY) |>
+  bind_rows(AU_CO_links |>  
+              tidygraph::as_tbl_graph() |> 
+              tidygraph::activate(edges) |> 
+              tidygraph::as_tibble() |> 
+              dplyr::select(CO = to, 
+                            year = PY)) |> 
+  unique() |> 
+  dplyr::group_by(CO) |> 
+  dplyr::slice(which.min(year)) |>
+  dplyr::ungroup() |> 
+  dplyr::select(year) |> 
+  dplyr::group_by(year) |> 
+  dplyr::count(year) |> 
+  dplyr::filter(year >= 2000,
+                year <= 2020) |> 
+  dplyr::ungroup() |> 
+  dplyr::mutate(percentage = n / max(n)) |> 
+  select(year, percentage) |> 
+  dplyr::right_join(range_tbl_fig_2, 
+                    by = c("year" = "PY")) |> 
+  tidyr::replace_na(list(percentage = 0)) 
+
+figure_2c_longitudinal <- 
+  figure_2c_cluster_nodes |> 
+  mutate(type = "nodes") |> 
+  bind_rows(figure_2c_cluster_edges |> 
+              mutate(type = "links")) |> 
+  ggplot(aes(x = year, 
+             y = percentage, 
+             color = type)) +
+  geom_point() +
+  geom_line() +
+  theme(legend.position = "right", 
+        text = element_text(color = "black", 
+                            face = "bold",
+                            family = "Times New Roman"),
+        plot.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white"), 
+        axis.text.y = element_text(size = 15, 
+                                   colour = "black"),
+        axis.text.x = element_text(size = 15,
+                                   colour = "black", 
+                                   angle = 45, vjust = 0.5
+        ),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        legend.text = element_text(size = "15"), 
+        legend.title = element_blank()) +
+  labs(title = "Nodes and links through time", 
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = seq(1999, 2022, by = 1))
+
+figure_2c_longitudinal
+```
+
+## 3.3 Journal Analysis
+
+### Table 3a Most productive journals
+
+```{r}
+wos_scopus |> 
+  dplyr::select(journal = SO) |> 
+  na.omit() |> 
+  dplyr::group_by(journal) |> 
+  dplyr::count(journal, sort = TRUE) |> 
+  dplyr::rename(publications = n) |> 
+  dplyr::arrange(desc(publications)) |>
+  DT::datatable(class = "cell-border stripe", 
+                rownames = F, 
+                filter = "top", 
+                editable = FALSE, 
+                extensions = "Buttons", 
+                options = list(dom = "Bfrtip",
+                               buttons = c("copy",
+                                           "csv",
+                                           "excel", 
+                                           "pdf", 
+                                           "print")))
+```
+
+### Figure 3 Journal Citation Network
+
+Creating the graph object
+
+```{r}
+
+journal_citation_graph_weighted_tbl_small <- 
+  SO_links |> 
+  dplyr::select(JI_main, JI_ref) |> 
+  dplyr::group_by(JI_main, JI_ref) |> 
+  dplyr::count() |> 
+  dplyr::rename(weight = n) |> 
+  as_tbl_graph(directed = FALSE) |> 
+  # convert(to_simple) |> 
+  activate(nodes) |> 
+  dplyr::mutate(components = tidygraph::group_components(type = "weak"))  |> 
+  dplyr::filter(components == 1) |> 
+  activate(nodes) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::filter(degree > 1) |> 
+  dplyr::mutate(community = tidygraph::group_louvain()) |> 
+  dplyr::select(-components)  
+  # dplyr::filter(degree >= 1)
+# activate(edges) |>
+# dplyr::filter(weight != 1)
+
+communities <- 
+  journal_citation_graph_weighted_tbl_small |> 
+  activate(nodes) |> 
+  data.frame() |> 
+  dplyr::count(community, sort = TRUE) |> 
+  dplyr::slice(1:10) |> 
+  dplyr::select(community) |> 
+  dplyr::pull()
+# Filtering biggest communities 
+journal_citation_graph_weighted_tbl_small_fig <- 
+  journal_citation_graph_weighted_tbl_small |> 
+  activate(nodes) |> 
+  dplyr::filter(community %in% communities)
+
+```
+
+Selecting nodes to show
+
+```{r}
+jc_com_1 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[1]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_2 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[2]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_3 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[3]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_4 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[4]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_5 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[5]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_6 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[6]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_7<- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[7]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_8 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[8]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_9 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[9]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com_10 <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(community == communities[10]) |> 
+  dplyr::mutate(degree = centrality_degree()) |> 
+  dplyr::arrange(desc(degree)) |> 
+  dplyr::slice(1:10) |> 
+  data.frame() |> 
+  dplyr::select(name)
+jc_com <- 
+  jc_com_1 |> 
+  bind_rows(jc_com_2,
+            jc_com_3,
+            jc_com_4,
+            jc_com_5
+            # jc_com_6,
+            # jc_com_7,
+            # jc_com_8,
+            # jc_com_9,
+            # jc_com_10
+  )
+```
+
+### Figure 3a Journal Citation
+
+```{r}
+figure_3a_graph <- 
+  journal_citation_graph_weighted_tbl_small_fig |> 
+  activate(nodes) |> 
+  dplyr::filter(name %in% jc_com$name) |>
+  dplyr::mutate(degree = centrality_degree(),
+                community = factor(community)
+                ) |> 
+  dplyr::filter(degree != 0) |> 
+  ggraph(layout = "graphopt") +
+  geom_edge_link(aes(width = weight),
+                 colour = "lightgray") +
+  scale_edge_width(name = "Link strength") +
+  geom_node_point(aes(color = community, 
+                      size = degree)) +
+  # geom_node_text(aes(label = name), repel = TRUE) +
+  scale_size(name = "Degree") +
+  # scale_color_binned(name = "Communities") +
+  theme_graph()
+
+figure_3a_graph
+
+# figure_3a_data <-
+#   journal_citation_graph_weighted_tbl_small_fig |>
+#   activate(nodes) |>
+#   dplyr::filter(name %in% jc_com$name) |>
+#   dplyr::mutate(degree = centrality_degree(),
+#                 community = factor(community)) |>
+#   dplyr::filter(degree != 0)
+# 
+# figure_3a_data_graphml_nodes <-
+#   figure_3a_data |>
+#   activate(nodes) |>
+#   as_tibble() |>
+#   dplyr::rename(author = name) |>
+#   tibble::rownames_to_column("name")
+# 
+# figure_3a_data_graphml_edges <-
+#   figure_3a_data |>
+#   activate(edges) |>
+#   as_tibble()
+# 
+# figure_3a_data_graphml <-
+#   graph_from_data_frame(d = figure_3a_data_graphml_edges,
+#                         directed = FALSE,
+#                         vertices = figure_3a_data_graphml_nodes)
+# write_graph(figure_3a_data_graphml, "data/figure_3a_data_graphml.graphml", "graphml")
+
+# journal_citation_graph_weighted_tbl_small_fig |>
+#   activate(nodes) |>
+#   dplyr::filter(name %in% jc_com$name) |>
+#   dplyr::mutate(degree = centrality_degree(),
+#                 #community = factor(community)
+#                 ) |>
+#   dplyr::filter(degree != 0) |>
+#   tidygraph::as.igraph() |>
+#   igraph::simplify() |>
+#   write_graph("data/figure_3a_data_graphml.graphml", "graphml")
+```
+
+### Figure 3b clusters
+
+```{r}
+figure_3b_clusters <- 
+  journal_citation_graph_weighted_tbl_small |> 
+  activate(nodes) |> 
+  data.frame() |> 
+  dplyr::select(community) |> 
+  dplyr::count(community, sort = TRUE) |> 
+  dplyr::slice(1:10) |> 
+  ggplot(aes(x = reorder(community, n), y = n)) +
+  geom_point(stat = "identity") +
+  geom_line(group = 1) + 
+  # geom_text(label = as.numeric(community),
+  #           nudge_x = 0.5,
+  #           nudge_y = 0.5,
+  #           check_overlap = T) +
+  labs(title = "Communities by size", 
+       x = "communities", 
+       y = "Journals") +
+  # geom_text(aes(label = n),
+  #           vjust = -0.3,
+  #           position = position_dodge(0.9),
+  #           size = 5,
+  #           family = "Times" 
+  #           # color = "purple"
+  #           ) +
+  theme(text = element_text(color = "black",
+                            face = "bold",
+                            family = "Times New Roman"),
+        plot.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white"), 
+        axis.text.y = element_text(size = 15, 
+                                   colour = "black"),
+        axis.text.x = element_text(size = 15,
+                                   colour = "black"),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20)) +
+    geom_text(aes(label = n),
+            vjust = -0.3,
+            position = position_dodge(0.9),
+            size = 5,
+            family = "Times" 
+            # color = "purple"
+            ) 
+figure_3b_clusters
+```
+
+### Figure 3c Longitudinal data of AU_CO
+
+```{r}
+range_tbl_fig_3 <- 
+  tibble(PY_main = range(SO_links$PY_main)[1]:range(SO_links$PY_main)[2])
+# Create a dataframe with links 
+figure_3c_cluster_edges <- 
+  SO_links |>
+  dplyr::filter(JI_main != JI_ref) |> 
+  tidygraph::as_tbl_graph() |> 
+  activate(edges) |> 
+  as_tibble() |> 
+  dplyr::select(year = PY_main) |> 
+  dplyr::count(year) |> 
+  # dplyr::filter(year >= 2000,
+  #               year <= 2020) |> 
+  dplyr::mutate(percentage = n/max(n)) |> 
+  dplyr::select(year, percentage) |> 
+  dplyr::right_join(range_tbl_fig_3, 
+                    by = c("year" = "PY_main")) |> 
+  tidyr::replace_na(list(percentage = 0)) 
+# Create a data frame with author and year 
+figure_3c_cluster_nodes <- # 21 row 
+  SO_links |>
+  dplyr::filter(JI_main != JI_ref) |> 
+  tidygraph::as_tbl_graph() |> 
+  activate(edges) |> 
+  as_tibble() |> 
+  dplyr::select(CO = from, 
+                year = PY_main) |>
+  bind_rows(AU_CO_links |>  
+              tidygraph::as_tbl_graph() |> 
+              tidygraph::activate(edges) |> 
+              tidygraph::as_tibble() |> 
+              dplyr::select(CO = to, 
+                            year = PY)) |> 
+  unique() |> 
+  dplyr::group_by(CO) |> 
+  dplyr::slice(which.min(year)) |>
+  dplyr::ungroup() |> 
+  dplyr::select(year) |> 
+  dplyr::group_by(year) |> 
+  dplyr::count(year) |> 
+  # dplyr::filter(year >= 2000,
+  #               year <= 2020) |> 
+  dplyr::ungroup() |> 
+  dplyr::mutate(percentage = n / max(n)) |> 
+  select(year, percentage) |> 
+  dplyr::right_join(range_tbl_fig_3, 
+                    by = c("year" = "PY_main")) |> 
+  tidyr::replace_na(list(percentage = 0)) 
+
+figure_3_longitudinal <- 
+  figure_3c_cluster_nodes |> 
+  mutate(type = "nodes") |> 
+  dplyr::filter(year >= 2000) |> 
+  bind_rows(figure_3c_cluster_edges |> 
+               dplyr::filter(year >= 2000) |> 
+              mutate(type = "links")) |> 
+  ggplot(aes(x = year, 
+             y = percentage, 
+             color = type)) +
+  geom_point() +
+  geom_line() +
+  theme(legend.position = "right", 
+        text = element_text(color = "black", 
+                            face = "bold",
+                            family = "Times New Roman"),
+        plot.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white"), 
+        axis.text.y = element_text(size = 15, 
+                                   colour = "black"),
+        axis.text.x = element_text(size = 15,
+                                   colour = "black", 
+                                   angle = 45, vjust = 0.5
+        ),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        legend.text = element_text(size = "15"), 
+        legend.title = element_blank()) +
+  labs(title = "Nodes and links through time", 
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = seq(2000, 2022, by = 1))
+
+figure_3_longitudinal
+```
+
+
+## 3.2 Author Analysis
+
+### Table 4
+
+```{r}
+data_biblio_wos <- biblioAnalysis(wos_scopus)
+
+wos_scopus_authors <-
+  data_biblio_wos$Authors |>
+  data.frame() |>
+  dplyr::rename(authors_wos = AU, papers_wos = Freq) |>
+  dplyr::arrange(desc(papers_wos))
+
+wos_scopus_authors |>
+  DT::datatable(class = "cell-border stripe",
+                rownames = F,
+                filter = "top",
+                editable = FALSE,
+                extensions = "Buttons",
+                options = list(dom = "Bfrtip",
+                               buttons = c("copy",
+                                           "csv",
+                                           "excel",
+                                           "pdf",
+                                           "print")))
+```
+
+Creating the ASN - graph object
+
+
+```{r}
+author_network_time <- 
+  AU_links |> 
+  tidygraph::as_tbl_graph(directed = FALSE) |> 
+  activate(nodes) |> 
+  dplyr::mutate(components = tidygraph::group_components(type = "weak")) |> 
+  # dplyr::filter(components == 1) |> 
+  dplyr::mutate(degree = centrality_degree(),
+                community = as.factor(group_louvain()))
+
+author_network <- 
+  AU_links |> 
+  dplyr::select(-PY) |> 
+  dplyr::group_by(from, to) |> 
+  dplyr::count() |> 
+  dplyr::rename(weight = n) |> 
+  tidygraph::as_tbl_graph(directed = FALSE) |> 
+  activate(nodes) |> 
+  dplyr::mutate(components = tidygraph::group_components(type = "weak")) |> 
+  # dplyr::filter(components == 1) |> 
+  dplyr::mutate(degree = centrality_degree(),
+                community = as.factor(group_louvain()))
+
+```
+
+
+```{r}
+# author_collab_graphml_nodes <- 
+#   author_network |> 
+#   activate(nodes) |> 
+#   as_tibble() |> 
+#   dplyr::rename(author = name) |>
+#   tibble::rownames_to_column("name")
+# 
+# author_collab_graphml_edges <- 
+#   author_network |> 
+#   activate(edges) |> 
+#   as_tibble() 
+# author_collab_graphml <- 
+#   graph_from_data_frame(d = author_collab_graphml_edges, 
+#                         directed = FALSE, 
+#                         vertices = author_collab_graphml_nodes)
+# write_graph(author_collab_graphml, "author_collab_graphml.graphml", "graphml")
+```
+
+Filtering only the top 10 nodes with best degree in the first 6 clusters.
+
+```{r}
+asn_TM_connected_1 <- 
+  author_network |> 
+  activate(nodes) |>
+  dplyr::mutate(community = as.numeric(community)) |> 
+  # filter(community >= 6) |> 
+  dplyr::filter(components == 1) |> 
+  # group_by(community) |> 
+  dplyr::mutate(degree_community = centrality_degree()) |> 
+  dplyr::arrange(desc(degree_community)) |> 
+  dplyr::slice(1:10)
+asn_TM_connected_2 <- 
+  author_network |> 
+  activate(nodes) |>
+  dplyr::mutate(community = as.numeric(community)) |> 
+  # filter(community >= 6) |> 
+  dplyr::filter(components == 2) |> 
+  # group_by(community) |> 
+  dplyr::mutate(degree_community = centrality_degree()) |> 
+  dplyr::arrange(desc(degree_community))|> 
+  dplyr::slice(1:10)
+asn_TM_connected_3 <- 
+  author_network |> 
+  activate(nodes) |>
+  dplyr::mutate(community = as.numeric(community)) |> 
+  # filter(community >= 6) |> 
+  dplyr::filter(components == 3) |> 
+  # group_by(community) |> 
+  dplyr::mutate(degree_community = centrality_degree()) |> 
+  dplyr::arrange(desc(degree_community)) |> 
+  dplyr::slice(1:10)
+# asn_TM_connected_4 <- 
+#   author_network |> 
+#   activate(nodes) |>
+#   dplyr::mutate(community = as.numeric(community)) |> 
+#   # filter(community >= 6) |> 
+#   dplyr::filter(community == 4) |> 
+#   # group_by(community) |> 
+#   dplyr::mutate(degree_community = centrality_degree()) |> 
+#   dplyr::arrange(desc(degree_community)) |> 
+#   dplyr::slice(1:10)
+# asn_TM_connected_5 <- 
+#   author_network |> 
+#   activate(nodes) |>
+#   dplyr::mutate(community = as.numeric(community)) |> 
+#   # filter(community >= 6) |> 
+#   dplyr::filter(community == 5) |> 
+#   # group_by(community) |> 
+#   dplyr::mutate(degree_community = centrality_degree()) |> 
+#   dplyr::arrange(desc(degree_community)) |> 
+#   dplyr::slice(1:10)
+# asn_TM_connected_6 <- 
+#   author_network |> 
+#   activate(nodes) |>
+#   dplyr::mutate(community = as.numeric(community)) |> 
+#   # filter(community >= 6) |> 
+#   dplyr::filter(community == 6) |> 
+#   # group_by(community) |> 
+#   dplyr::mutate(degree_community = centrality_degree()) |> 
+#   dplyr::arrange(desc(degree_community)) |> 
+#   dplyr::slice(1:10)
+```
+
+Saving the nodes we're gonna show
+
+```{r}
+nodes_community_1 <- 
+  asn_TM_connected_1 |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  dplyr::select(name)
+nodes_community_2 <- 
+  asn_TM_connected_2 |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  dplyr::select(name)
+nodes_community_3 <- 
+  asn_TM_connected_3 |> 
+  activate(nodes) |> 
+  as_tibble() |> 
+  dplyr::select(name)
+# nodes_community_4 <- 
+#   asn_TM_connected_4 |> 
+#   activate(nodes) |> 
+#   as_tibble() |> 
+#   dplyr::select(name)
+# nodes_community_5 <- 
+#   asn_TM_connected_5 |> 
+#   activate(nodes) |> 
+#   as_tibble() |> 
+#   dplyr::select(name)
+# nodes_community_6 <- 
+#   asn_TM_connected_6 |> 
+#   activate(nodes) |> 
+#   as_tibble() |> 
+#   dplyr::select(name)
+nodes_selected_10 <- 
+  nodes_community_1 |> 
+  bind_rows(nodes_community_2, 
+            nodes_community_3,
+            # nodes_community_4,
+            # nodes_community_5,
+            # nodes_community_6
+  )
+```
+
+Filtering selected nodes
+
+```{r}
+asn_selected_nodes <- 
+  author_network |> 
+  activate(nodes) |> 
+  dplyr::filter(name %in% nodes_selected_10$name)  |> 
+  dplyr::mutate(degree = centrality_degree())
+
+# dplyr::mutate(final_plot = tidygraph::group_components(type = "weak")) |> 
+# dplyr::filter(final_plot == 1)
+```
+
+### Figure 4a Author Network
+
+```{r}
+figure_4a_graph <- 
+  asn_selected_nodes |> 
+  ggraph(layout = "graphopt") +
+  geom_edge_link(aes(width = weight),
+                 colour = "lightgray") +
+  scale_edge_width(name = "Link strength") +
+  geom_node_point(aes(color = community, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  scale_size(name = "Degree") +
+  # scale_color_binned(name = "Communities") +
+  theme_graph()
+
+figure_4a_graph
+```
+
+```{r}
+ego_1 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[1]),
+                     order = 1,
+                     mode = "all")
+
+ego_2 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[2]),
+                     order = 1,
+                     mode = "all")
+
+ego_3 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[3]),
+                     order = 1,
+                     mode = "all")
+
+ego_4 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[4]),
+                     order = 1,
+                     mode = "all")
+
+ego_5 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[5]),
+                     order = 1,
+                     mode = "all")
+
+
+ego_6 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[6]),
+                     order = 1,
+                     mode = "all")
+
+ego_7 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[7]),
+                     order = 1,
+                     mode = "all")
+
+ego_8 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[8]),
+                     order = 1,
+                     mode = "all")
+
+ego_9 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[9]),
+                     order = 1,
+                     mode = "all")
+
+ego_10 <- 
+  author_network |> 
+  tidygraph::convert(to_local_neighborhood,
+                     node = which(.N()$name == wos_scopus_authors$authors_wos[10]),
+                     order = 1,
+                     mode = "all")
+  
+```
+
+merging ego_networks 
+
+```{r}
+egos <- 
+  ego_1 |> 
+  tidygraph::graph_join(ego_2) |> 
+  tidygraph::graph_join(ego_3) |> 
+  tidygraph::graph_join(ego_4) |> 
+  tidygraph::graph_join(ego_5) |> 
+  tidygraph::graph_join(ego_6) |> 
+  tidygraph::graph_join(ego_7) |> 
+  tidygraph::graph_join(ego_8) |> 
+  tidygraph::graph_join(ego_9) |> 
+  tidygraph::graph_join(ego_10) |> 
+  activate(nodes) |> 
+  dplyr::mutate(component = tidygraph::group_components(),
+                component = factor(component),
+                degree = tidygraph::centrality_degree()) 
+
+
+egos |>
+  ggraph(layout = "graphopt") +
+  geom_edge_link(aes(width = weight),
+                 colour = "lightgray") +
+  scale_edge_width(name = "Link strength") +
+  geom_node_point(aes(color = component, 
+                      size = degree)) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  scale_size(name = "Degree") +
+  # scale_color_binned(name = "Communities") +
+  theme_graph()
+```
+
+```{r}
+# author_collab_graphml_nodes <- 
+#   egos |> 
+#   activate(nodes) |> 
+#   as_tibble() |> 
+#   dplyr::rename(author = name) |>
+#   tibble::rownames_to_column("name")
+# 
+# author_collab_graphml_edges <- 
+#   egos |> 
+#   activate(edges) |> 
+#   as_tibble() 
+# 
+# author_collab_graphml <- 
+#   graph_from_data_frame(d = author_collab_graphml_edges, 
+#                         directed = FALSE, 
+#                         vertices = author_collab_graphml_nodes)
+# write_graph(author_collab_graphml, "egos_author_collab_graphml.graphml", "graphml")
+```
+
+### Figure 4b clusters of each community
+
+```{r}
+figure_4b_clusters <- 
+  author_network |> 
+  activate(nodes) |> 
+  data.frame() |> 
+  dplyr::count(community) |>
+  slice(1:10) |>  
+  ggplot(aes(x = reorder(community, n), y = n)) +
+  geom_point(stat = "identity") +
+  geom_line(group = 1) + 
+  # geom_text(label = as.numeric(community),
+  #           nudge_x = 0.5,
+  #           nudge_y = 0.5,
+  #           check_overlap = T) +
+  labs(title = "Communities by size", 
+       x = "communities", 
+       y = "Authors") +
+  theme(text = element_text(color = "black",
+                            face = "bold",
+                            family = "Times New Roman"),
+        plot.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white"), 
+        axis.text.y = element_text(size = 15, 
+                                   colour = "black"),
+        axis.text.x = element_text(size = 15,
+                                   colour = "black"),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20)) 
+
+figure_4b_clusters
+```
+
+### Figure 4c Longitudinal data of ASN
+
+```{r}
+AU_links_no_na <- 
+  AU_links |> 
+  tidyr::drop_na()
+
+range_tbl_fig_4 <- 
+  tibble(PY = range(AU_links_no_na$PY)[1]:range(AU_links_no_na$PY)[2])
+# Create a dataframe with links 
+figure_4c_cluster_edges <- 
+  author_network_time |>
+  activate(edges) |> 
+  as_tibble() |> 
+  dplyr::select(year = PY) |> 
+  dplyr::count(year) |> 
+  # dplyr::filter(year >= 1954,
+  #               year <= 2020) |> 
+  dplyr::mutate(percentage = n/max(n)) |> 
+  dplyr::select(year, percentage) |> 
+  dplyr::right_join(range_tbl_fig_4, 
+                    by = c("year" = "PY")) |> 
+  tidyr::replace_na(list(percentage = 0)) 
+
+# Create a data frame with author and year 
+figure_4c_cluster_nodes <- # 21 row 
+  author_network_time |>
+  activate(edges) |> 
+  as_tibble() |> 
+  dplyr::select(author = from, 
+                year = PY) |>
+  bind_rows(author_network_time |> 
+              activate(edges) |> 
+              as_tibble() |> 
+              dplyr::select(author = to, 
+                            year = PY)) |> 
+  unique() |> 
+  dplyr::group_by(author) |> 
+  dplyr::slice(which.min(year)) |>
+  dplyr::ungroup() |> 
+  dplyr::select(year) |> 
+  dplyr::group_by(year) |> 
+  dplyr::count(year) |> 
+  # dplyr::filter(year >= 2000,
+  #               year <= 2020) |> 
+  dplyr::ungroup() |> 
+  dplyr::mutate(percentage = n / max(n)) |> 
+  select(year, percentage) |> 
+  dplyr::right_join(range_tbl_fig_4, 
+                    by = c("year" = "PY")) |> 
+  tidyr::replace_na(list(percentage = 0)) 
+```
+
+plotting figure 4b
+
+```{r}
+figure_4c_longitudinal <- 
+  figure_4c_cluster_nodes |> 
+  filter(year > 1992) |> 
+  mutate(type = "nodes") |> 
+  bind_rows(figure_4c_cluster_edges |> 
+              mutate(type = "links")|> 
+              filter(year > 1992) ) |> 
+  ggplot(aes(x = year, 
+             y = percentage, 
+             color = type)) +
+  geom_point() +
+  geom_line() +
+  theme(legend.position = "right", 
+        text = element_text(color = "black", 
+                            face = "bold",
+                            family = "Times New Roman"),
+        plot.title = element_text(size = 25),
+        panel.background = element_rect(fill = "white"), 
+        axis.text.y = element_text(size = 15, 
+                                   colour = "black"),
+        axis.text.x = element_text(size = 15,
+                                   colour = "black", 
+                                   angle = 45, vjust = 0.5
+        ),
+        axis.title.x = element_text(size = 20),
+        axis.title.y = element_text(size = 20),
+        legend.text = element_text(size = "15"), 
+        legend.title = element_blank()) +
+  labs(title = "Nodes and links through time", 
+       y = "Percentage") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = seq(1993, 2022, by = 1))
+
+figure_4c_longitudinal
+```
+
+
+
+
+
